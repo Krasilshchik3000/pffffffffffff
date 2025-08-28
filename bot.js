@@ -1,9 +1,8 @@
 const { Telegraf } = require('telegraf');
 const store = require('app-store-scraper');
+const gplay = require('google-play-scraper');
 const fs = require('fs').promises;
 const path = require('path');
-const axios = require('axios');
-const cheerio = require('cheerio');
 
 // Токен бота (из переменных окружения или константы для разработки)
 const BOT_TOKEN = process.env.BOT_TOKEN || '7624758051:AAGjLs1BLaF43CjTjPIwd3pJlKvprNaenZA';
@@ -11,12 +10,15 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '7624758051:AAGjLs1BLaF43CjTjPIwd3pJl
 // ID подкаста "Два по цене одного"
 const PODCAST_ID = process.env.PODCAST_ID || '1371411915';
 
-// URLs подкаста в других сервисах
-const PODCAST_URLS = {
-    google: 'https://podcasts.google.com/feed/aHR0cHM6Ly9mZWVkLnBvZGJlYW4uY29tL3R3by1mb3Itb25lL2ZlZWQueG1s',
-    castbox: 'https://castbox.fm/channel/id1371411915',
-    overcast: 'https://overcast.fm/itunes1371411915',
-    pocketcasts: 'https://pca.st/itunes/1371411915'
+// ID приложений подкастов в магазинах
+const PODCAST_APPS = {
+    // Castbox в Google Play
+    castbox_app: 'fm.castbox.audiobook.radio.podcast',
+    // Spotify в Google Play  
+    spotify_app: 'com.spotify.music',
+    // Google Podcasts в Google Play (был закрыт)
+    // Pocket Casts в Google Play
+    pocketcasts_app: 'au.com.shiftyjelly.pocketcasts'
 };
 
 // Полный список стран для поиска рецензий (топ 50 стран по популярности Apple Store)
@@ -290,72 +292,30 @@ async function getMonthlyReviews(ctx) {
     }
 }
 
-// Функция для парсинга отзывов из Google Podcasts (через RSS и поиск)
-async function getGooglePodcastsReviews() {
+// Функция для получения отзывов из Google Play Store (приложения подкастов)
+async function getGooglePlayReviews(appId, appName, limit = 10) {
     try {
-        console.log('Попытка получения отзывов из Google Podcasts...');
-        // Google Podcasts не предоставляет публичные отзывы через API
-        // Возвращаем заглушку с информацией
-        return [{
-            id: 'google_info',
-            title: 'Google Podcasts',
-            text: 'Google Podcasts не предоставляет публичные отзывы. Подкаст доступен в Google Podcasts.',
-            score: null,
-            userName: 'Система',
-            updated: new Date().toISOString(),
-            countryCode: 'global',
-            countryName: 'Google Podcasts',
-            source: 'Google Podcasts'
-        }];
-    } catch (error) {
-        console.error('Ошибка при получении отзывов из Google Podcasts:', error);
-        return [];
-    }
-}
-
-// Функция для парсинга информации из Castbox
-async function getCastboxReviews() {
-    try {
-        console.log('Попытка получения информации из Castbox...');
+        console.log(`Получение отзывов из Google Play для ${appName}...`);
         
-        // Castbox не предоставляет публичные отзывы через простой HTTP запрос
-        // Для полноценного парсинга нужен более сложный подход с браузером
-        return [{
-            id: 'castbox_info',
-            title: 'Castbox',
-            text: 'Подкаст доступен в Castbox. Для получения отзывов из Castbox требуется более сложная настройка.',
-            score: null,
-            userName: 'Система',
-            updated: new Date().toISOString(),
-            countryCode: 'global',
-            countryName: 'Castbox',
-            source: 'Castbox'
-        }];
-    } catch (error) {
-        console.error('Ошибка при получении информации из Castbox:', error);
-        return [];
-    }
-}
+        const reviews = await gplay.reviews({
+            appId: appId,
+            sort: gplay.sort.NEWEST,
+            num: limit
+        });
 
-// Функция для получения информации из Overcast
-async function getOvercastReviews() {
-    try {
-        console.log('Попытка получения информации из Overcast...');
-        
-        // Overcast также не предоставляет публичные отзывы
-        return [{
-            id: 'overcast_info',
-            title: 'Overcast',
-            text: 'Подкаст доступен в Overcast. Overcast не показывает публичные отзывы пользователей.',
-            score: null,
-            userName: 'Система',
-            updated: new Date().toISOString(),
+        return reviews.data.map(review => ({
+            id: `gplay_${appId}_${review.id}`,
+            title: review.title || `Отзыв на ${appName}`,
+            text: review.text,
+            score: review.score,
+            userName: review.userName,
+            updated: review.date,
             countryCode: 'global',
-            countryName: 'Overcast',
-            source: 'Overcast'
-        }];
+            countryName: 'Google Play',
+            source: `${appName} (Google Play)`
+        }));
     } catch (error) {
-        console.error('Ошибка при получении информации из Overcast:', error);
+        console.error(`Ошибка при получении отзывов ${appName} из Google Play:`, error);
         return [];
     }
 }
@@ -384,24 +344,24 @@ async function getAllSourcesReviews(ctx, limit = 20) {
             console.error('Ошибка получения отзывов из Apple:', error);
         }
         
-        // Получаем информацию из других источников
+        // Получаем отзывы из Google Play Store (приложения подкастов)
         try {
             await ctx.telegram.editMessageText(
                 progressMessage.chat.id,
                 progressMessage.message_id,
                 null,
-                `🌐 Проверяю другие источники: Google Podcasts, Castbox, Overcast...`
+                `🌐 Получаю отзывы из Google Play Store (Castbox, Spotify, Pocket Casts)...`
             );
             
-            const [googleReviews, castboxReviews, overcastReviews] = await Promise.all([
-                getGooglePodcastsReviews(),
-                getCastboxReviews(),
-                getOvercastReviews()
+            const [castboxReviews, spotifyReviews, pocketcastsReviews] = await Promise.all([
+                getGooglePlayReviews(PODCAST_APPS.castbox_app, 'Castbox', 10),
+                getGooglePlayReviews(PODCAST_APPS.spotify_app, 'Spotify', 10),
+                getGooglePlayReviews(PODCAST_APPS.pocketcasts_app, 'Pocket Casts', 10)
             ]);
             
-            allReviews.push(...googleReviews, ...castboxReviews, ...overcastReviews);
+            allReviews.push(...castboxReviews, ...spotifyReviews, ...pocketcastsReviews);
         } catch (error) {
-            console.error('Ошибка получения информации из других источников:', error);
+            console.error('Ошибка получения отзывов из Google Play:', error);
         }
         
         // Сортируем по дате и источнику
@@ -465,10 +425,9 @@ function formatReviewMessage(review, index) {
     if (review.source) {
         const sourceEmoji = {
             'Apple Podcasts': '🍎',
-            'Google Podcasts': '🎧',
-            'Castbox': '📦',
-            'Overcast': '☁️',
-            'Pocket Casts': '🎙️'
+            'Castbox (Google Play)': '📦',
+            'Spotify (Google Play)': '🎵',
+            'Pocket Casts (Google Play)': '🎙️'
         };
         message += `${sourceEmoji[review.source] || '📱'} Источник: ${review.source}\n`;
     } else {
@@ -512,7 +471,7 @@ bot.start((ctx) => {
         'Команды:\n' +
         '/reviews - получить последние 20 рецензий из Apple Podcasts\n' +
         '/month - получить все рецензии за последний месяц\n' +
-        '/all - получить отзывы из всех источников (Apple, Google, Castbox, Overcast)\n' +
+        '/all - получить отзывы из всех источников (Apple + Google Play)\n' +
         '/help - показать справку'
     );
 });
@@ -523,13 +482,14 @@ bot.help((ctx) => {
         'Доступные команды:\n\n' +
         '🍎 /reviews - последние 20 рецензий из Apple Podcasts\n' +
         '🗓️ /month - все рецензии за последний месяц\n' +
-        '🌐 /all - отзывы из всех источников (Apple, Google, Castbox, Overcast)\n' +
+        '🌐 /all - отзывы из всех источников\n' +
         '❓ /help - показать эту справку\n\n' +
-        'Подкаст: "Два по цене одного"\n' +
-        '🍎 Apple Podcasts: поиск в 73 странах\n' +
-        '🎧 Google Podcasts: проверка доступности\n' +
-        '📦 Castbox: проверка доступности\n' +
-        '☁️ Overcast: проверка доступности'
+        'Подкаст: "Два по цене одного"\n\n' +
+        'Источники отзывов:\n' +
+        '🍎 Apple Podcasts (73 страны)\n' +
+        '📦 Castbox (Google Play отзывы)\n' +
+        '🎵 Spotify (Google Play отзывы)\n' +
+        '🎙️ Pocket Casts (Google Play отзывы)'
     );
 });
 
@@ -641,7 +601,7 @@ bot.command('all', async (ctx) => {
         }
         
         // Отправляем заголовочное сообщение
-        await ctx.reply(`🌐 *Отзывы из всех источников: ${reviews.length} записей*\n\n🍎 Apple Podcasts \\+ 🎧 Google Podcasts \\+ 📦 Castbox \\+ ☁️ Overcast\n\nОтправляю по одной записи\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        await ctx.reply(`🌐 *Отзывы из всех источников: ${reviews.length} записей*\n\n🍎 Apple Podcasts \\+ 📦 Castbox \\+ 🎵 Spotify \\+ 🎙️ Pocket Casts\n\nОтправляю по одной записи\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
         
         // Отправляем каждый отзыв отдельным сообщением
         for (let i = 0; i < reviews.length; i++) {
