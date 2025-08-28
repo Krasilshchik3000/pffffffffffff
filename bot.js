@@ -93,7 +93,7 @@ const COUNTRIES = [
 const bot = new Telegraf(BOT_TOKEN);
 
 // Функция для получения рецензий подкаста из всех стран
-async function getPodcastReviews(ctx) {
+async function getPodcastReviews(ctx, limit = 20) {
     try {
         console.log('Получение рецензий подкаста из всех стран...');
         
@@ -159,8 +159,8 @@ async function getPodcastReviews(ctx) {
             return dateB - dateA;
         });
         
-        // Берем только последние 20 рецензий
-        const latestReviews = allReviews.slice(0, 20);
+        // Берем только последние рецензии в указанном количестве
+        const latestReviews = allReviews.slice(0, limit);
         
         console.log(`Всего получено ${allReviews.length} рецензий из ${COUNTRIES.length} стран`);
         console.log(`Отобрано последних ${latestReviews.length} рецензий`);
@@ -180,6 +180,102 @@ async function getPodcastReviews(ctx) {
         return latestReviews;
     } catch (error) {
         console.error('Ошибка при получении рецензий:', error);
+        throw error;
+    }
+}
+
+// Функция для получения рецензий за последний месяц
+async function getMonthlyReviews(ctx) {
+    try {
+        console.log('Получение рецензий за последний месяц...');
+        
+        const allReviews = [];
+        let processedCountries = 0;
+        let totalCountries = COUNTRIES.length;
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        
+        // Отправляем начальное сообщение о прогрессе
+        const progressMessage = await ctx.reply(`🗓️ Ищу рецензии за последний месяц...\nПроверяю ${totalCountries} стран. Это может занять 1-2 минуты.`);
+        
+        // Получаем рецензии из каждой страны
+        for (const country of COUNTRIES) {
+            try {
+                console.log(`Получение рецензий из ${country.name} (${country.code})...`);
+                
+                const reviews = await store.reviews({
+                    id: PODCAST_ID,
+                    country: country.code,
+                    page: 1,
+                    sort: store.sort.RECENT
+                });
+
+                // Фильтруем рецензии за последний месяц
+                const monthlyReviews = reviews.filter(review => {
+                    if (!review.updated) return false;
+                    const reviewDate = new Date(review.updated);
+                    return reviewDate >= oneMonthAgo;
+                });
+
+                // Добавляем информацию о стране к каждой рецензии
+                const reviewsWithCountry = monthlyReviews.map(review => ({
+                    ...review,
+                    countryCode: country.code,
+                    countryName: country.name
+                }));
+                
+                allReviews.push(...reviewsWithCountry);
+                console.log(`Получено ${monthlyReviews.length} рецензий за месяц из ${country.name}`);
+                
+                processedCountries++;
+                
+                // Обновляем прогресс каждые 10 стран
+                if (processedCountries % 10 === 0 || processedCountries === totalCountries) {
+                    try {
+                        await ctx.telegram.editMessageText(
+                            progressMessage.chat.id,
+                            progressMessage.message_id,
+                            null,
+                            `🗓️ Поиск месячных рецензий: ${processedCountries}/${totalCountries} стран проверено\n📊 Найдено ${allReviews.length} рецензий за месяц`
+                        );
+                    } catch (editError) {
+                        // Игнорируем ошибки редактирования сообщения
+                    }
+                }
+                
+                // Небольшая задержка между запросами
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+            } catch (countryError) {
+                console.error(`Ошибка при получении рецензий из ${country.name}:`, countryError.message);
+                processedCountries++;
+            }
+        }
+        
+        // Сортируем все рецензии по дате (новые первыми)
+        allReviews.sort((a, b) => {
+            const dateA = new Date(a.updated || 0);
+            const dateB = new Date(b.updated || 0);
+            return dateB - dateA;
+        });
+        
+        console.log(`Всего получено ${allReviews.length} рецензий за месяц из ${COUNTRIES.length} стран`);
+        
+        // Финальное сообщение о завершении поиска
+        try {
+            await ctx.telegram.editMessageText(
+                progressMessage.chat.id,
+                progressMessage.message_id,
+                null,
+                `✅ Поиск завершен!\n📊 Проверено ${totalCountries} стран\n📝 Найдено ${allReviews.length} рецензий за последний месяц`
+            );
+        } catch (editError) {
+            // Игнорируем ошибки редактирования сообщения
+        }
+        
+        return allReviews;
+    } catch (error) {
+        console.error('Ошибка при получении месячных рецензий:', error);
         throw error;
     }
 }
@@ -245,6 +341,7 @@ bot.start((ctx) => {
         'Привет! Я бот для получения рецензий подкаста "Два по цене одного".\n\n' +
         'Команды:\n' +
         '/reviews - получить последние 20 рецензий\n' +
+        '/month - получить все рецензии за последний месяц\n' +
         '/help - показать справку'
     );
 });
@@ -253,9 +350,11 @@ bot.start((ctx) => {
 bot.help((ctx) => {
     ctx.reply(
         'Доступные команды:\n\n' +
-        '/reviews - получить последние 20 рецензий подкаста в виде текстового файла\n' +
+        '/reviews - получить последние 20 рецензий подкаста\n' +
+        '/month - получить все рецензии за последний месяц\n' +
         '/help - показать эту справку\n\n' +
-        'Подкаст: "Два по цене одного" в Apple Podcasts'
+        'Подкаст: "Два по цене одного" в Apple Podcasts\n' +
+        'Поиск ведется в 73 странах мира 🌍'
     );
 });
 
@@ -304,6 +403,54 @@ bot.command('reviews', async (ctx) => {
     } catch (error) {
         console.error('Ошибка при обработке команды /reviews:', error);
         await ctx.reply('Произошла ошибка при получении рецензий. Попробуйте позже.');
+    }
+});
+
+// Обработка команды /month
+bot.command('month', async (ctx) => {
+    try {
+        // Получаем месячные рецензии
+        const reviews = await getMonthlyReviews(ctx);
+        
+        if (reviews.length === 0) {
+            await ctx.reply('Рецензии за последний месяц не найдены.');
+            return;
+        }
+        
+        // Отправляем заголовочное сообщение
+        await ctx.reply(`🗓️ *Все ${reviews.length} рецензий за последний месяц подкаста "Два по цене одного"*\n\nОтправляю по одной рецензии\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        
+        // Отправляем каждую рецензию отдельным сообщением
+        for (let i = 0; i < reviews.length; i++) {
+            const reviewMessage = formatReviewMessage(reviews[i], i);
+            
+            try {
+                // Отправляем с Markdown режимом для правильного форматирования
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
+                
+                // Небольшая задержка между сообщениями, чтобы не превысить лимиты Telegram
+                if (i < reviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            } catch (msgError) {
+                console.error(`Ошибка отправки рецензии ${i + 1}:`, msgError);
+                // Если Markdown не работает, отправляем без форматирования
+                try {
+                    const plainMessage = reviewMessage.replace(/\*/g, '');
+                    await ctx.reply(plainMessage);
+                } catch (plainError) {
+                    // В крайнем случае отправляем упрощенную версию
+                    const simpleMessage = `Рецензия ${i + 1}\n\n${reviews[i].title || 'Без названия'}\nАвтор: ${reviews[i].userName || 'Аноним'}\nСтрана: ${reviews[i].countryName}\nОценка: ${reviews[i].score}/5\n\n${reviews[i].text || 'Без комментария'}`;
+                    await ctx.reply(simpleMessage);
+                }
+            }
+        }
+        
+        await ctx.reply(`✅ Все ${reviews.length} рецензий за месяц отправлены!`);
+        
+    } catch (error) {
+        console.error('Ошибка при обработке команды /month:', error);
+        await ctx.reply('Произошла ошибка при получении месячных рецензий. Попробуйте позже.');
     }
 });
 
