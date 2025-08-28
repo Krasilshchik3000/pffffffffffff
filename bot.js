@@ -198,11 +198,18 @@ function escapeMarkdownKeepEmoji(text) {
     return text.replace(/([_*\[\]()~`>#+=|{}.!-])/g, '\\$1');
 }
 
+// Функция для безопасного экранирования Markdown
+function escapeMarkdown(text) {
+    if (!text) return text;
+    // Экранируем только самые проблемные символы для Markdown
+    return text.replace(/([_`\[\]])/g, '\\$1');
+}
+
 // Функция для форматирования рецензии в текст сообщения
 function formatReviewMessage(review, index) {
     let message = `📝 Рецензия ${index + 1}\n\n`;
-    message += `📌 *${cleanText(review.title || 'Без названия')}*\n`;
-    message += `👤 Автор: ${cleanText(review.userName || 'Аноним')}\n`;
+    message += `📌 *${escapeMarkdown(cleanText(review.title || 'Без названия'))}*\n`;
+    message += `👤 Автор: ${escapeMarkdown(cleanText(review.userName || 'Аноним'))}\n`;
     message += `🌍 Страна: ${review.countryName || 'Неизвестно'} (${review.countryCode || '?'})\n`;
     message += `⭐ Оценка: ${'★'.repeat(review.score || 0)}${'☆'.repeat(5 - (review.score || 0))} (${review.score || 0}/5)\n`;
     
@@ -227,7 +234,7 @@ function formatReviewMessage(review, index) {
     }
     message += `📅 Дата: ${dateStr}\n\n`;
     
-    message += `💬 *Текст рецензии:*\n${cleanText(review.text || 'Без комментария')}`;
+    message += `💬 *Текст рецензии:*\n${escapeMarkdown(cleanText(review.text || 'Без комментария'))}`;
     
     return message;
 }
@@ -271,8 +278,8 @@ bot.command('reviews', async (ctx) => {
             const reviewMessage = formatReviewMessage(reviews[i], i);
             
             try {
-                // Отправляем без parse_mode, чтобы эмодзи отображались корректно
-                await ctx.reply(reviewMessage);
+                // Отправляем с Markdown режимом для правильного форматирования
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
                 
                 // Небольшая задержка между сообщениями, чтобы не превысить лимиты Telegram
                 if (i < reviews.length - 1) {
@@ -280,9 +287,15 @@ bot.command('reviews', async (ctx) => {
                 }
             } catch (msgError) {
                 console.error(`Ошибка отправки рецензии ${i + 1}:`, msgError);
-                // Пробуем отправить упрощенную версию
-                const simpleMessage = `Рецензия ${i + 1}\n\n${review.title || 'Без названия'}\nАвтор: ${review.userName || 'Аноним'}\nСтрана: ${review.countryName}\nОценка: ${review.score}/5\n\n${review.text || 'Без комментария'}`;
-                await ctx.reply(simpleMessage);
+                // Если Markdown не работает, отправляем без форматирования
+                try {
+                    const plainMessage = reviewMessage.replace(/\*/g, '');
+                    await ctx.reply(plainMessage);
+                } catch (plainError) {
+                    // В крайнем случае отправляем упрощенную версию
+                    const simpleMessage = `Рецензия ${i + 1}\n\n${reviews[i].title || 'Без названия'}\nАвтор: ${reviews[i].userName || 'Аноним'}\nСтрана: ${reviews[i].countryName}\nОценка: ${reviews[i].score}/5\n\n${reviews[i].text || 'Без комментария'}`;
+                    await ctx.reply(simpleMessage);
+                }
             }
         }
         
