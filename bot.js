@@ -1,6 +1,5 @@
 const { Telegraf } = require('telegraf');
 const store = require('app-store-scraper');
-const gplay = require('google-play-scraper');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -10,16 +9,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '7624758051:AAGjLs1BLaF43CjTjPIwd3pJl
 // ID подкаста "Два по цене одного"
 const PODCAST_ID = process.env.PODCAST_ID || '1371411915';
 
-// ID приложений подкастов в магазинах
-const PODCAST_APPS = {
-    // Castbox в Google Play
-    castbox_app: 'fm.castbox.audiobook.radio.podcast',
-    // Spotify в Google Play  
-    spotify_app: 'com.spotify.music',
-    // Google Podcasts в Google Play (был закрыт)
-    // Pocket Casts в Google Play
-    pocketcasts_app: 'au.com.shiftyjelly.pocketcasts'
-};
+
 
 // Полный список стран для поиска рецензий (топ 50 стран по популярности Apple Store)
 const COUNTRIES = [
@@ -292,107 +282,9 @@ async function getMonthlyReviews(ctx) {
     }
 }
 
-// Функция для получения отзывов из Google Play Store (приложения подкастов)
-async function getGooglePlayReviews(appId, appName, limit = 10) {
-    try {
-        console.log(`Получение отзывов из Google Play для ${appName}...`);
-        
-        const reviews = await gplay.reviews({
-            appId: appId,
-            sort: gplay.sort.NEWEST,
-            num: limit
-        });
 
-        return reviews.data.map(review => ({
-            id: `gplay_${appId}_${review.id}`,
-            title: review.title || `Отзыв на ${appName}`,
-            text: review.text,
-            score: review.score,
-            userName: review.userName,
-            updated: review.date,
-            countryCode: 'global',
-            countryName: 'Google Play',
-            source: `${appName} (Google Play)`
-        }));
-    } catch (error) {
-        console.error(`Ошибка при получении отзывов ${appName} из Google Play:`, error);
-        return [];
-    }
-}
 
-// Функция для получения отзывов из всех источников
-async function getAllSourcesReviews(ctx, limit = 20) {
-    try {
-        console.log('Получение отзывов из всех источников...');
-        
-        const progressMessage = await ctx.reply(`🌐 Собираю отзывы из всех источников...\nЭто может занять 2-3 минуты.`);
-        
-        const allReviews = [];
-        
-        // Получаем отзывы из Apple Podcasts
-        try {
-            await ctx.telegram.editMessageText(
-                progressMessage.chat.id,
-                progressMessage.message_id,
-                null,
-                `🌐 Получаю отзывы из Apple Podcasts (73 страны)...`
-            );
-            
-            const appleReviews = await getPodcastReviews(ctx, 50); // Больше отзывов из Apple
-            allReviews.push(...appleReviews);
-        } catch (error) {
-            console.error('Ошибка получения отзывов из Apple:', error);
-        }
-        
-        // Получаем отзывы из Google Play Store (приложения подкастов)
-        try {
-            await ctx.telegram.editMessageText(
-                progressMessage.chat.id,
-                progressMessage.message_id,
-                null,
-                `🌐 Получаю отзывы из Google Play Store (Castbox, Spotify, Pocket Casts)...`
-            );
-            
-            const [castboxReviews, spotifyReviews, pocketcastsReviews] = await Promise.all([
-                getGooglePlayReviews(PODCAST_APPS.castbox_app, 'Castbox', 10),
-                getGooglePlayReviews(PODCAST_APPS.spotify_app, 'Spotify', 10),
-                getGooglePlayReviews(PODCAST_APPS.pocketcasts_app, 'Pocket Casts', 10)
-            ]);
-            
-            allReviews.push(...castboxReviews, ...spotifyReviews, ...pocketcastsReviews);
-        } catch (error) {
-            console.error('Ошибка получения отзывов из Google Play:', error);
-        }
-        
-        // Сортируем по дате и источнику
-        allReviews.sort((a, b) => {
-            // Сначала Apple Podcasts отзывы (у них есть реальные даты)
-            if (a.source && b.source) {
-                if (a.source === 'Apple Podcasts' && b.source !== 'Apple Podcasts') return -1;
-                if (a.source !== 'Apple Podcasts' && b.source === 'Apple Podcasts') return 1;
-            }
-            
-            const dateA = new Date(a.updated || 0);
-            const dateB = new Date(b.updated || 0);
-            return dateB - dateA;
-        });
-        
-        // Ограничиваем количество
-        const limitedReviews = allReviews.slice(0, limit);
-        
-        await ctx.telegram.editMessageText(
-            progressMessage.chat.id,
-            progressMessage.message_id,
-            null,
-            `✅ Сбор завершен!\n📱 Apple Podcasts: ${allReviews.filter(r => !r.source || r.source === 'Apple Podcasts').length} отзывов\n🌐 Другие источники: ${allReviews.filter(r => r.source && r.source !== 'Apple Podcasts').length} проверено\n⭐ Отобрано: ${limitedReviews.length} записей`
-        );
-        
-        return limitedReviews;
-    } catch (error) {
-        console.error('Ошибка при получении отзывов из всех источников:', error);
-        throw error;
-    }
-}
+
 
 // Функция для очистки текста от лишних символов и форматирования
 function cleanText(text) {
@@ -424,10 +316,7 @@ function formatReviewMessage(review, index) {
     // Показываем источник, если он указан
     if (review.source) {
         const sourceEmoji = {
-            'Apple Podcasts': '🍎',
-            'Castbox (Google Play)': '📦',
-            'Spotify (Google Play)': '🎵',
-            'Pocket Casts (Google Play)': '🎙️'
+            'Apple Podcasts': '🍎'
         };
         message += `${sourceEmoji[review.source] || '📱'} Источник: ${review.source}\n`;
     } else {
@@ -471,7 +360,6 @@ bot.start((ctx) => {
         'Команды:\n' +
         '/reviews - получить последние 20 рецензий из Apple Podcasts\n' +
         '/month - получить все рецензии за последний месяц\n' +
-        '/all - получить отзывы из всех источников (Apple + Google Play)\n' +
         '/help - показать справку'
     );
 });
@@ -482,14 +370,10 @@ bot.help((ctx) => {
         'Доступные команды:\n\n' +
         '🍎 /reviews - последние 20 рецензий из Apple Podcasts\n' +
         '🗓️ /month - все рецензии за последний месяц\n' +
-        '🌐 /all - отзывы из всех источников\n' +
         '❓ /help - показать эту справку\n\n' +
         'Подкаст: "Два по цене одного"\n\n' +
         'Источники отзывов:\n' +
-        '🍎 Apple Podcasts (73 страны)\n' +
-        '📦 Castbox (Google Play отзывы)\n' +
-        '🎵 Spotify (Google Play отзывы)\n' +
-        '🎙️ Pocket Casts (Google Play отзывы)'
+        '🍎 Apple Podcasts (73 страны)'
     );
 });
 
@@ -589,57 +473,7 @@ bot.command('month', async (ctx) => {
     }
 });
 
-// Обработка команды /all
-bot.command('all', async (ctx) => {
-    try {
-        // Получаем отзывы из всех источников
-        const reviews = await getAllSourcesReviews(ctx, 25);
-        
-        if (reviews.length === 0) {
-            await ctx.reply('Отзывы из всех источников не найдены.');
-            return;
-        }
-        
-        // Отправляем заголовочное сообщение
-        await ctx.reply(`🌐 *Отзывы из всех источников: ${reviews.length} записей*\n\n🍎 Apple Podcasts \\+ 📦 Castbox \\+ 🎵 Spotify \\+ 🎙️ Pocket Casts\n\nОтправляю по одной записи\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
-        
-        // Отправляем каждый отзыв отдельным сообщением
-        for (let i = 0; i < reviews.length; i++) {
-            const reviewMessage = formatReviewMessage(reviews[i], i);
-            
-            try {
-                // Отправляем с Markdown режимом для правильного форматирования
-                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
-                
-                // Небольшая задержка между сообщениями
-                if (i < reviews.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 250));
-                }
-            } catch (msgError) {
-                console.error(`Ошибка отправки записи ${i + 1}:`, msgError);
-                // Если Markdown не работает, отправляем без форматирования
-                try {
-                    const plainMessage = reviewMessage.replace(/\*/g, '');
-                    await ctx.reply(plainMessage);
-                } catch (plainError) {
-                    // В крайнем случае отправляем упрощенную версию
-                    const simpleMessage = `Запись ${i + 1}\n\n${reviews[i].title || 'Без названия'}\nАвтор: ${reviews[i].userName || 'Аноним'}\nИсточник: ${reviews[i].source || reviews[i].countryName}\n\n${reviews[i].text || 'Без комментария'}`;
-                    await ctx.reply(simpleMessage);
-                }
-            }
-        }
-        
-        // Подсчитываем статистику по источникам
-        const appleCount = reviews.filter(r => !r.source || r.source === 'Apple Podcasts').length;
-        const otherCount = reviews.filter(r => r.source && r.source !== 'Apple Podcasts').length;
-        
-        await ctx.reply(`✅ Все записи отправлены!\n\n📊 Статистика:\n🍎 Apple Podcasts: ${appleCount} отзывов\n🌐 Другие источники: ${otherCount} записей`);
-        
-    } catch (error) {
-        console.error('Ошибка при обработке команды /all:', error);
-        await ctx.reply('Произошла ошибка при получении отзывов из всех источников. Попробуйте позже.');
-    }
-});
+
 
 // Обработка неизвестных команд
 bot.on('text', (ctx) => {
