@@ -353,6 +353,111 @@ function formatReviewMessage(review, index) {
     return message;
 }
 
+// Функция для получения максимального количества рецензий из всех источников
+async function getAllPossibleReviews(ctx) {
+    try {
+        console.log('Получение максимального количества рецензий...');
+        
+        const allReviews = [];
+        let processedCountries = 0;
+        let totalCountries = COUNTRIES.length;
+        
+        // Отправляем начальное сообщение о прогрессе
+        const progressMessage = await ctx.reply(`🌍 Собираю ВСЕ доступные рецензии из Apple Podcasts...\nПроверяю ${totalCountries} стран, несколько страниц в каждой. Это займет 3-5 минут.`);
+        
+        // Получаем рецензии из каждой страны (несколько страниц)
+        for (const country of COUNTRIES) {
+            try {
+                console.log(`Получение всех рецензий из ${country.name} (${country.code})...`);
+                
+                // Получаем первые 3 страницы рецензий из каждой страны
+                for (let page = 1; page <= 3; page++) {
+                    try {
+                        const reviews = await store.reviews({
+                            id: PODCAST_ID,
+                            country: country.code,
+                            page: page,
+                            sort: store.sort.RECENT
+                        });
+
+                        if (reviews.length === 0) break; // Если на странице нет рецензий, прекращаем
+
+                        // Добавляем информацию о стране к каждой рецензии
+                        const reviewsWithCountry = reviews.map(review => ({
+                            ...review,
+                            countryCode: country.code,
+                            countryName: country.name
+                        }));
+                        
+                        allReviews.push(...reviewsWithCountry);
+                        console.log(`Получено ${reviews.length} рецензий со страницы ${page} из ${country.name}`);
+                        
+                        // Небольшая задержка между страницами
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    } catch (pageError) {
+                        console.error(`Ошибка получения страницы ${page} из ${country.name}:`, pageError.message);
+                        break; // Прекращаем получение страниц для этой страны
+                    }
+                }
+                
+                processedCountries++;
+                
+                // Обновляем прогресс каждые 5 стран
+                if (processedCountries % 5 === 0 || processedCountries === totalCountries) {
+                    try {
+                        await ctx.telegram.editMessageText(
+                            progressMessage.chat.id,
+                            progressMessage.message_id,
+                            null,
+                            `🌍 Сбор всех рецензий: ${processedCountries}/${totalCountries} стран обработано\n📊 Собрано ${allReviews.length} рецензий`
+                        );
+                    } catch (editError) {
+                        // Игнорируем ошибки редактирования сообщения
+                    }
+                }
+                
+                // Небольшая задержка между странами
+                await new Promise(resolve => setTimeout(resolve, 150));
+                
+            } catch (countryError) {
+                console.error(`Ошибка при получении рецензий из ${country.name}:`, countryError.message);
+                processedCountries++;
+            }
+        }
+        
+        // Убираем дубликаты рецензий (по ID)
+        const uniqueReviews = allReviews.filter((review, index, self) => 
+            index === self.findIndex(r => r.id === review.id)
+        );
+        
+        // Сортируем все рецензии по дате (новые первыми)
+        uniqueReviews.sort((a, b) => {
+            const dateA = new Date(a.updated || 0);
+            const dateB = new Date(b.updated || 0);
+            return dateB - dateA;
+        });
+        
+        console.log(`Всего собрано ${allReviews.length} рецензий, уникальных: ${uniqueReviews.length}`);
+        
+        // Финальное сообщение о завершении поиска
+        try {
+            await ctx.telegram.editMessageText(
+                progressMessage.chat.id,
+                progressMessage.message_id,
+                null,
+                `✅ Сбор завершен!\n📊 Проверено ${totalCountries} стран (по 3 страницы каждая)\n📝 Собрано ${allReviews.length} рецензий\n🔄 Уникальных: ${uniqueReviews.length} рецензий`
+            );
+        } catch (editError) {
+            // Игнорируем ошибки редактирования сообщения
+        }
+        
+        return uniqueReviews;
+    } catch (error) {
+        console.error('Ошибка при получении всех рецензий:', error);
+        throw error;
+    }
+}
+
 // Обработка команды /start
 bot.start((ctx) => {
     ctx.reply(
@@ -360,6 +465,7 @@ bot.start((ctx) => {
         'Команды:\n' +
         '/reviews - получить последние 20 рецензий из Apple Podcasts\n' +
         '/month - получить все рецензии за последний месяц\n' +
+        '/all - получить ВСЕ доступные рецензии (может быть много!)\n' +
         '/help - показать справку'
     );
 });
@@ -370,10 +476,11 @@ bot.help((ctx) => {
         'Доступные команды:\n\n' +
         '🍎 /reviews - последние 20 рецензий из Apple Podcasts\n' +
         '🗓️ /month - все рецензии за последний месяц\n' +
+        '🌍 /all - ВСЕ доступные рецензии (73 страны × 3 страницы)\n' +
         '❓ /help - показать эту справку\n\n' +
         'Подкаст: "Два по цене одного"\n\n' +
         'Источники отзывов:\n' +
-        '🍎 Apple Podcasts (73 страны)'
+        '🍎 Apple Podcasts (73 страны, до ~1000 рецензий)'
     );
 });
 
@@ -473,7 +580,63 @@ bot.command('month', async (ctx) => {
     }
 });
 
-
+// Обработка команды /all
+bot.command('all', async (ctx) => {
+    try {
+        // Получаем ВСЕ возможные рецензии
+        const reviews = await getAllPossibleReviews(ctx);
+        
+        if (reviews.length === 0) {
+            await ctx.reply('Рецензии не найдены.');
+            return;
+        }
+        
+        // Предупреждаем о большом количестве сообщений
+        if (reviews.length > 100) {
+            await ctx.reply(`⚠️ *Внимание!* Найдено ${reviews.length} рецензий\\!\n\nЭто много сообщений\\. Отправка займет ${Math.ceil(reviews.length * 0.3 / 60)} минут\\.\n\nНачинаю отправку\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        } else {
+            await ctx.reply(`🌍 *Все найденные рецензии: ${reviews.length} штук*\n\nОтправляю по одной рецензии\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        }
+        
+        // Отправляем каждую рецензию отдельным сообщением
+        for (let i = 0; i < reviews.length; i++) {
+            const reviewMessage = formatReviewMessage(reviews[i], i);
+            
+            try {
+                // Отправляем с Markdown режимом для правильного форматирования
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
+                
+                // Небольшая задержка между сообщениями
+                if (i < reviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+                
+                // Каждые 50 рецензий показываем прогресс
+                if ((i + 1) % 50 === 0 && i < reviews.length - 1) {
+                    await ctx.reply(`📊 Отправлено ${i + 1} из ${reviews.length} рецензий...`);
+                }
+                
+            } catch (msgError) {
+                console.error(`Ошибка отправки рецензии ${i + 1}:`, msgError);
+                // Если Markdown не работает, отправляем без форматирования
+                try {
+                    const plainMessage = reviewMessage.replace(/\*/g, '');
+                    await ctx.reply(plainMessage);
+                } catch (plainError) {
+                    // В крайнем случае отправляем упрощенную версию
+                    const simpleMessage = `Рецензия ${i + 1}\n\n${reviews[i].title || 'Без названия'}\nАвтор: ${reviews[i].userName || 'Аноним'}\nСтрана: ${reviews[i].countryName}\nОценка: ${reviews[i].score}/5\n\n${reviews[i].text || 'Без комментария'}`;
+                    await ctx.reply(simpleMessage);
+                }
+            }
+        }
+        
+        await ctx.reply(`✅ Все ${reviews.length} рецензий отправлены!\n\n📊 Статистика:\n🌍 Стран проверено: 73\n📄 Страниц проверено: до 219\n📝 Уникальных рецензий: ${reviews.length}`);
+        
+    } catch (error) {
+        console.error('Ошибка при обработке команды /all:', error);
+        await ctx.reply('Произошла ошибка при получении всех рецензий. Попробуйте позже.');
+    }
+});
 
 // Обработка неизвестных команд
 bot.on('text', (ctx) => {
