@@ -593,12 +593,13 @@ bot.command('all', async (ctx) => {
         
         // Предупреждаем о большом количестве сообщений
         if (reviews.length > 100) {
-            await ctx.reply(`⚠️ *Внимание!* Найдено ${reviews.length} рецензий\\!\n\nЭто много сообщений\\. Отправка займет ${Math.ceil(reviews.length * 0.3 / 60)} минут\\.\n\nНачинаю отправку\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+            const estimatedMinutes = Math.ceil(reviews.length * 1.5 / 60 + Math.floor(reviews.length / 20) * 10 / 60);
+            await ctx.reply(`⚠️ *Внимание!* Найдено ${reviews.length} рецензий\\!\n\nОтправка займет ~${estimatedMinutes} минут с паузами для избежания лимитов Telegram\\.\n\nНачинаю отправку\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
         } else {
             await ctx.reply(`🌍 *Все найденные рецензии: ${reviews.length} штук*\n\nОтправляю по одной рецензии\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
         }
         
-        // Отправляем каждую рецензию отдельным сообщением
+        // Отправляем каждую рецензию отдельным сообщением с улучшенной обработкой лимитов
         for (let i = 0; i < reviews.length; i++) {
             const reviewMessage = formatReviewMessage(reviews[i], i);
             
@@ -606,27 +607,58 @@ bot.command('all', async (ctx) => {
                 // Отправляем с Markdown режимом для правильного форматирования
                 await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
                 
-                // Небольшая задержка между сообщениями
+                // Увеличенная задержка между сообщениями для избежания лимитов
                 if (i < reviews.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 секунды
                 }
                 
-                // Каждые 50 рецензий показываем прогресс
+                // Каждые 20 сообщений делаем длинную паузу
+                if ((i + 1) % 20 === 0 && i < reviews.length - 1) {
+                    await ctx.reply(`⏸️ Пауза для избежания лимитов Telegram... Отправлено ${i + 1} из ${reviews.length}`);
+                    await new Promise(resolve => setTimeout(resolve, 10000)); // 10 секунд пауза
+                }
+                
+                // Каждые 50 рецензий показываем подробный прогресс
                 if ((i + 1) % 50 === 0 && i < reviews.length - 1) {
-                    await ctx.reply(`📊 Отправлено ${i + 1} из ${reviews.length} рецензий...`);
+                    const remaining = reviews.length - (i + 1);
+                    const estimatedMinutes = Math.ceil(remaining * 1.5 / 60);
+                    await ctx.reply(`📊 Прогресс: ${i + 1}/${reviews.length} отправлено\n⏱️ Осталось ~${estimatedMinutes} минут`);
                 }
                 
             } catch (msgError) {
                 console.error(`Ошибка отправки рецензии ${i + 1}:`, msgError);
+                
+                // Проверяем, не превышен ли лимит запросов
+                if (msgError.description && msgError.description.includes('Too Many Requests')) {
+                    const retryAfter = msgError.parameters?.retry_after || 60;
+                    await ctx.reply(`⚠️ Превышен лимит Telegram API. Пауза на ${retryAfter} секунд...`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                    i--; // Повторяем отправку этой рецензии
+                    continue;
+                }
+                
                 // Если Markdown не работает, отправляем без форматирования
                 try {
                     const plainMessage = reviewMessage.replace(/\*/g, '');
                     await ctx.reply(plainMessage);
                 } catch (plainError) {
-                    // В крайнем случае отправляем упрощенную версию
-                    const simpleMessage = `Рецензия ${i + 1}\n\n${reviews[i].title || 'Без названия'}\nАвтор: ${reviews[i].userName || 'Аноним'}\nСтрана: ${reviews[i].countryName}\nОценка: ${reviews[i].score}/5\n\n${reviews[i].text || 'Без комментария'}`;
-                    await ctx.reply(simpleMessage);
+                    console.error(`Критическая ошибка отправки рецензии ${i + 1}:`, plainError);
+                    
+                    // Если и простое сообщение не отправляется, делаем паузу и пропускаем
+                    if (plainError.description && plainError.description.includes('Too Many Requests')) {
+                        const retryAfter = plainError.parameters?.retry_after || 60;
+                        await ctx.reply(`⚠️ Критический лимит API. Пауза на ${retryAfter} секунд...`);
+                        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                        i--; // Повторяем отправку этой рецензии
+                        continue;
+                    }
+                    
+                    // В крайнем случае пропускаем эту рецензию
+                    await ctx.reply(`❌ Не удалось отправить рецензию ${i + 1}. Пропускаю...`);
                 }
+                
+                // Дополнительная пауза после ошибки
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
         
