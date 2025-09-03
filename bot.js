@@ -598,10 +598,21 @@ function calculateTimeSinceStart(startDate, currentDate) {
 // Функция для форматирования уведомления о новом эпизоде
 async function formatNewEpisodeMessage(stats, newEpisode) {
     const episodeCount = stats.totalEpisodes;
-    const totalHours = Math.round(stats.totalHours);
     
-    // Правильные склонения для порядкового числительного
-    const hourForm = getCorrectForm(totalHours, ['час', 'часа', 'часов']);
+    // Точный расчет часов и минут
+    const totalMinutes = Math.round(stats.totalHours * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    // Правильные склонения
+    const hourForm = getCorrectForm(hours, ['час', 'часа', 'часов']);
+    const minuteForm = getCorrectForm(minutes, ['минуту', 'минуты', 'минут']);
+    
+    // Формируем текст времени
+    let timeText = `${hours} ${hourForm}`;
+    if (minutes > 0) {
+        timeText += ` ${minutes} ${minuteForm}`;
+    }
     
     // Расчет времени с начала
     const timeSince = calculateTimeSinceStart(stats.startDate, new Date(newEpisode.pubDate));
@@ -609,15 +620,15 @@ async function formatNewEpisodeMessage(stats, newEpisode) {
     const monthForm = getCorrectForm(timeSince.months, ['месяц', 'месяца', 'месяцев']);
     const dayForm = getCorrectForm(timeSince.days, ['день', 'дня', 'дней']);
     
-    let timeText = '';
-    if (timeSince.years > 0) timeText += `${timeSince.years} ${yearForm}`;
+    let durationText = '';
+    if (timeSince.years > 0) durationText += `${timeSince.years} ${yearForm}`;
     if (timeSince.months > 0) {
-        if (timeText) timeText += ' ';
-        timeText += `${timeSince.months} ${monthForm}`;
+        if (durationText) durationText += ' ';
+        durationText += `${timeSince.months} ${monthForm}`;
     }
     if (timeSince.days > 0) {
-        if (timeText) timeText += ' ';
-        timeText += `${timeSince.days} ${dayForm}`;
+        if (durationText) durationText += ' ';
+        durationText += `${timeSince.days} ${dayForm}`;
     }
     
     // Получаем ссылку на эпизод с podcast.ru
@@ -631,7 +642,7 @@ async function formatNewEpisodeMessage(stats, newEpisode) {
         console.error('Ошибка получения ссылки podcast.ru:', error);
     }
     
-    return `*Вышел новый выпуск*\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}.${episodeLink}`;
+    return `*Вышел новый выпуск*\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${timeText} подкастов. Вы делаете этот подкаст ${durationText}.${episodeLink}`;
 }
 
 // Функция для проверки новых эпизодов
