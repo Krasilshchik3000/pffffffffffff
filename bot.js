@@ -545,8 +545,7 @@ function formatNewEpisodeMessage(stats, newEpisode) {
     const episodeCount = stats.totalEpisodes;
     const totalHours = Math.round(stats.totalHours);
     
-    // Правильные склонения
-    const episodeForm = getCorrectForm(episodeCount, ['выпуск', 'выпуска', 'выпусков']);
+    // Правильные склонения для порядкового числительного
     const hourForm = getCorrectForm(totalHours, ['час', 'часа', 'часов']);
     
     // Расчет времени с начала
@@ -566,7 +565,17 @@ function formatNewEpisodeMessage(stats, newEpisode) {
         timeText += `${timeSince.days} ${dayForm}`;
     }
     
-    return `🎉 Вышел новый выпуск!\n\nЭто ваш ${episodeCount} ${episodeForm}, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}!`;
+    // Генерируем ссылку на podcast.ru (берем ID из RSS)
+    let episodeLink = '';
+    if (newEpisode.link && newEpisode.link.includes('transistor.fm')) {
+        // Извлекаем ID из ссылки transistor
+        const linkMatch = newEpisode.link.match(/\/s\/([a-zA-Z0-9]+)/);
+        if (linkMatch) {
+            episodeLink = `\n\n🎧 Слушать: https://podcast.ru/e/${linkMatch[1]}`;
+        }
+    }
+    
+    return `🎉 Вышел новый выпуск!\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}!${episodeLink}`;
 }
 
 // Функция для проверки новых эпизодов
@@ -856,19 +865,17 @@ bot.command('test_episode', async (ctx) => {
             itunes: { duration: '2500' } // ~42 минуты
         };
         
-        // Временно увеличиваем статистику для теста
+        // Симулируем статистику ПОСЛЕ добавления нового эпизода для теста
         const testStats = {
             ...stats,
-            totalEpisodes: stats.totalEpisodes + 1,
+            totalEpisodes: stats.totalEpisodes + 1, // Показываем, как будет после нового эпизода
             totalHours: stats.totalHours + (2500 / 3600),
             startDate: new Date(stats.startDate)
         };
         
         const message = formatNewEpisodeMessage(testStats, testEpisode);
         
-        await ctx.reply('📝 Тестовое уведомление:\n\n' + message);
-        
-        await ctx.reply(`📊 Текущая статистика:\n• Эпизодов: ${stats.totalEpisodes}\n• Часов: ${Math.round(stats.totalHours)}\n• Последняя проверка: ${new Date(stats.lastCheck).toLocaleString('ru-RU')}`);
+        await ctx.reply('📝 Тестовое уведомление (как будет выглядеть при новом эпизоде):\n\n' + message);
         
     } catch (error) {
         console.error('Ошибка тестирования:', error);
