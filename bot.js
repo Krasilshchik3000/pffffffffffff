@@ -573,15 +573,24 @@ async function saveStats(stats) {
     }
 }
 
-// Функция для расчета времени с начала подкаста
+// Функция для расчета времени с начала подкаста (правильный календарный расчет)
 function calculateTimeSinceStart(startDate, currentDate) {
-    const diffMs = currentDate - startDate;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    let years = currentDate.getFullYear() - startDate.getFullYear();
+    let months = currentDate.getMonth() - startDate.getMonth();
+    let days = currentDate.getDate() - startDate.getDate();
     
-    const years = Math.floor(diffDays / 365);
-    const remainingDays = diffDays % 365;
-    const months = Math.floor(remainingDays / 30);
-    const days = remainingDays % 30;
+    // Корректируем, если дни отрицательные
+    if (days < 0) {
+        months--;
+        const lastMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0);
+        days += lastMonth.getDate();
+    }
+    
+    // Корректируем, если месяцы отрицательные
+    if (months < 0) {
+        years--;
+        months += 12;
+    }
     
     return { years, months, days };
 }
