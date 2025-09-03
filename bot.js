@@ -4,6 +4,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const Parser = require('rss-parser');
 const parser = new Parser();
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 // Токен бота (из переменных окружения или константы для разработки)
 const BOT_TOKEN = process.env.BOT_TOKEN || '7624758051:AAGjLs1BLaF43CjTjPIwd3pJlKvprNaenZA';
@@ -502,6 +504,50 @@ function parseDurationToSeconds(durationText) {
     return seconds;
 }
 
+// Функция для получения ссылки на эпизод с podcast.ru
+async function getPodcastRuEpisodeLink(episodeTitle) {
+    try {
+        const url = 'https://podcast.ru/1371411915/e';
+        
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
+        
+        const $ = cheerio.load(response.data);
+        
+        // Ищем ссылки на эпизоды
+        const episodes = [];
+        $('a[href*="/e/"]').each((i, element) => {
+            const $link = $(element);
+            const href = $link.attr('href');
+            const title = $link.text().trim() || $link.find('*').text().trim();
+            
+            if (href && title) {
+                episodes.push({
+                    title: title,
+                    link: href.startsWith('http') ? href : `https://podcast.ru${href}`
+                });
+            }
+        });
+        
+        // Ищем эпизод по названию (частичное совпадение)
+        const cleanEpisodeTitle = episodeTitle.toLowerCase().replace(/[^\w\s]/g, '');
+        const matchingEpisode = episodes.find(ep => {
+            const cleanTitle = ep.title.toLowerCase().replace(/[^\w\s]/g, '');
+            return cleanTitle.includes(cleanEpisodeTitle.substring(0, 20)) || 
+                   cleanEpisodeTitle.includes(cleanTitle.substring(0, 20));
+        });
+        
+        return matchingEpisode ? matchingEpisode.link : null;
+        
+    } catch (error) {
+        console.error('Ошибка парсинга podcast.ru:', error);
+        return null;
+    }
+}
+
 // Функция для загрузки/сохранения статистики
 async function loadStats() {
     try {
@@ -534,14 +580,14 @@ function calculateTimeSinceStart(startDate, currentDate) {
     
     const years = Math.floor(diffDays / 365);
     const remainingDays = diffDays % 365;
-    const weeks = Math.floor(remainingDays / 7);
-    const days = remainingDays % 7;
+    const months = Math.floor(remainingDays / 30);
+    const days = remainingDays % 30;
     
-    return { years, weeks, days };
+    return { years, months, days };
 }
 
 // Функция для форматирования уведомления о новом эпизоде
-function formatNewEpisodeMessage(stats, newEpisode) {
+async function formatNewEpisodeMessage(stats, newEpisode) {
     const episodeCount = stats.totalEpisodes;
     const totalHours = Math.round(stats.totalHours);
     
@@ -551,28 +597,29 @@ function formatNewEpisodeMessage(stats, newEpisode) {
     // Расчет времени с начала
     const timeSince = calculateTimeSinceStart(stats.startDate, new Date(newEpisode.pubDate));
     const yearForm = getCorrectForm(timeSince.years, ['год', 'года', 'лет']);
-    const weekForm = getCorrectForm(timeSince.weeks, ['неделю', 'недели', 'недель']);
+    const monthForm = getCorrectForm(timeSince.months, ['месяц', 'месяца', 'месяцев']);
     const dayForm = getCorrectForm(timeSince.days, ['день', 'дня', 'дней']);
     
     let timeText = '';
     if (timeSince.years > 0) timeText += `${timeSince.years} ${yearForm}`;
-    if (timeSince.weeks > 0) {
+    if (timeSince.months > 0) {
         if (timeText) timeText += ' ';
-        timeText += `${timeSince.weeks} ${weekForm}`;
+        timeText += `${timeSince.months} ${monthForm}`;
     }
     if (timeSince.days > 0) {
         if (timeText) timeText += ' ';
         timeText += `${timeSince.days} ${dayForm}`;
     }
     
-    // Генерируем ссылку на podcast.ru (берем ID из RSS)
+    // Получаем ссылку на эпизод с podcast.ru
     let episodeLink = '';
-    if (newEpisode.link && newEpisode.link.includes('transistor.fm')) {
-        // Извлекаем ID из ссылки transistor
-        const linkMatch = newEpisode.link.match(/\/s\/([a-zA-Z0-9]+)/);
-        if (linkMatch) {
-            episodeLink = `\n\n🎧 Слушать: https://podcast.ru/e/${linkMatch[1]}`;
+    try {
+        const podcastRuLink = await getPodcastRuEpisodeLink(newEpisode.title);
+        if (podcastRuLink) {
+            episodeLink = `\n\nСлушать: ${podcastRuLink}`;
         }
+    } catch (error) {
+        console.error('Ошибка получения ссылки podcast.ru:', error);
     }
     
     return `*Вышел новый выпуск*\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}.${episodeLink}`;
@@ -625,7 +672,7 @@ async function checkForNewEpisodes() {
         await saveStats(stats);
         
         // Формируем сообщение
-        const message = formatNewEpisodeMessage(stats, latestEpisode);
+        const message = await formatNewEpisodeMessage(stats, latestEpisode);
         
         console.log('Отправка уведомлений во все чаты...');
         console.log('Сообщение:', message);
@@ -872,17 +919,15 @@ bot.command('test_episode', async (ctx) => {
         
         await ctx.reply(`Последний эпизод в RSS:\n"${latestEpisode.title}"\nПродолжительность: ${minutes} минут`);
         
-        // Симулируем, как будет выглядеть уведомление для этого эпизода
+        // Показываем уведомление на основе ТЕКУЩЕЙ статистики (без добавления эпизода)
         const testStats = {
             ...stats,
-            totalEpisodes: stats.totalEpisodes + 1,
-            totalHours: stats.totalHours + (duration / 3600),
             startDate: new Date(stats.startDate)
         };
         
-        const message = formatNewEpisodeMessage(testStats, latestEpisode);
+        const message = await formatNewEpisodeMessage(testStats, latestEpisode);
         
-        await ctx.reply('Тестовое уведомление на основе реального эпизода:\n\n' + message, { parse_mode: 'Markdown' });
+        await ctx.reply('Тестовое уведомление (как выглядит для последнего эпизода):\n\n' + message, { parse_mode: 'Markdown' });
         
     } catch (error) {
         console.error('Ошибка тестирования:', error);
