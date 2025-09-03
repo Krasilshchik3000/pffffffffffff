@@ -2,12 +2,27 @@ const { Telegraf } = require('telegraf');
 const store = require('app-store-scraper');
 const fs = require('fs').promises;
 const path = require('path');
+const Parser = require('rss-parser');
+const parser = new Parser();
 
 // Токен бота (из переменных окружения или константы для разработки)
 const BOT_TOKEN = process.env.BOT_TOKEN || '7624758051:AAGjLs1BLaF43CjTjPIwd3pJlKvprNaenZA';
 
 // ID подкаста "Два по цене одного"
 const PODCAST_ID = process.env.PODCAST_ID || '1371411915';
+
+// RSS-лента для мониторинга новых эпизодов
+const RSS_FEED_URL = 'https://feeds.transistor.fm/8ad5c0b4-9622-4e86-ba14-2a2e436f68b3';
+
+// Базовая статистика подкастов (на 28 августа 2025)
+const PODCAST_STATS = {
+    totalEpisodes: 245,
+    totalHours: 164,
+    startDate: new Date('2018-04-12') // 12 апреля 2018 года
+};
+
+// Файл для хранения текущей статистики
+const STATS_FILE = path.join(__dirname, 'podcast_stats.json');
 
 
 
@@ -458,6 +473,162 @@ async function getAllPossibleReviews(ctx) {
     }
 }
 
+// Функция для правильного склонения числительных
+function getCorrectForm(number, forms) {
+    const n = Math.abs(number) % 100;
+    const n1 = n % 10;
+    
+    if (n > 10 && n < 20) return forms[2];
+    if (n1 > 1 && n1 < 5) return forms[1];
+    if (n1 === 1) return forms[0];
+    return forms[2];
+}
+
+// Функция для парсинга продолжительности в секундах
+function parseDurationToSeconds(durationText) {
+    if (!durationText) return 0;
+    
+    if (/^\d+$/.test(durationText)) {
+        return parseInt(durationText);
+    }
+    
+    const parts = durationText.split(':').map(p => parseInt(p)).reverse();
+    let seconds = 0;
+    
+    if (parts[0]) seconds += parts[0];
+    if (parts[1]) seconds += parts[1] * 60;
+    if (parts[2]) seconds += parts[2] * 3600;
+    
+    return seconds;
+}
+
+// Функция для загрузки/сохранения статистики
+async function loadStats() {
+    try {
+        const data = await fs.readFile(STATS_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        // Если файл не существует, создаем базовую статистику
+        const initialStats = {
+            ...PODCAST_STATS,
+            lastEpisodeId: null,
+            lastCheck: new Date().toISOString()
+        };
+        await saveStats(initialStats);
+        return initialStats;
+    }
+}
+
+async function saveStats(stats) {
+    try {
+        await fs.writeFile(STATS_FILE, JSON.stringify(stats, null, 2), 'utf8');
+    } catch (error) {
+        console.error('Ошибка сохранения статистики:', error);
+    }
+}
+
+// Функция для расчета времени с начала подкаста
+function calculateTimeSinceStart(startDate, currentDate) {
+    const diffMs = currentDate - startDate;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    const years = Math.floor(diffDays / 365);
+    const remainingDays = diffDays % 365;
+    const weeks = Math.floor(remainingDays / 7);
+    const days = remainingDays % 7;
+    
+    return { years, weeks, days };
+}
+
+// Функция для форматирования уведомления о новом эпизоде
+function formatNewEpisodeMessage(stats, newEpisode) {
+    const episodeCount = stats.totalEpisodes;
+    const totalHours = Math.round(stats.totalHours);
+    
+    // Правильные склонения
+    const episodeForm = getCorrectForm(episodeCount, ['выпуск', 'выпуска', 'выпусков']);
+    const hourForm = getCorrectForm(totalHours, ['час', 'часа', 'часов']);
+    
+    // Расчет времени с начала
+    const timeSince = calculateTimeSinceStart(stats.startDate, new Date(newEpisode.pubDate));
+    const yearForm = getCorrectForm(timeSince.years, ['год', 'года', 'лет']);
+    const weekForm = getCorrectForm(timeSince.weeks, ['неделю', 'недели', 'недель']);
+    const dayForm = getCorrectForm(timeSince.days, ['день', 'дня', 'дней']);
+    
+    let timeText = '';
+    if (timeSince.years > 0) timeText += `${timeSince.years} ${yearForm}`;
+    if (timeSince.weeks > 0) {
+        if (timeText) timeText += ' ';
+        timeText += `${timeSince.weeks} ${weekForm}`;
+    }
+    if (timeSince.days > 0) {
+        if (timeText) timeText += ' ';
+        timeText += `${timeSince.days} ${dayForm}`;
+    }
+    
+    return `🎉 Вышел новый выпуск!\n\nЭто ваш ${episodeCount} ${episodeForm}, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}!`;
+}
+
+// Функция для проверки новых эпизодов
+async function checkForNewEpisodes() {
+    try {
+        console.log('Проверка новых эпизодов...');
+        
+        const stats = await loadStats();
+        const feed = await parser.parseURL(RSS_FEED_URL);
+        
+        if (!feed.items || feed.items.length === 0) {
+            console.log('RSS-лента пуста');
+            return;
+        }
+        
+        // Берем самый новый эпизод
+        const latestEpisode = feed.items[0];
+        
+        // Проверяем, новый ли это эпизод
+        if (stats.lastEpisodeId === latestEpisode.guid) {
+            console.log('Новых эпизодов нет');
+            return;
+        }
+        
+        // Проверяем, что это не трейлер и длиннее 5 минут
+        const title = latestEpisode.title?.toLowerCase() || '';
+        const isTrailer = title.includes('трейлер') || title.includes('trailer');
+        const duration = parseDurationToSeconds(latestEpisode.itunes?.duration);
+        const minutes = duration / 60;
+        
+        if (isTrailer || minutes < 5) {
+            console.log(`Пропускаем: "${latestEpisode.title}" (трейлер или <5 мин)`);
+            // Обновляем ID последнего эпизода, но не статистику
+            stats.lastEpisodeId = latestEpisode.guid;
+            await saveStats(stats);
+            return;
+        }
+        
+        console.log(`🎉 Найден новый эпизод: "${latestEpisode.title}"`);
+        
+        // Обновляем статистику
+        stats.totalEpisodes += 1;
+        stats.totalHours += duration / 3600; // добавляем часы
+        stats.lastEpisodeId = latestEpisode.guid;
+        stats.lastCheck = new Date().toISOString();
+        
+        await saveStats(stats);
+        
+        // Формируем сообщение
+        const message = formatNewEpisodeMessage(stats, latestEpisode);
+        
+        console.log('Отправка уведомлений во все чаты...');
+        console.log('Сообщение:', message);
+        
+        // Здесь будет отправка во все чаты (пока логируем)
+        // TODO: Получить список всех чатов и отправить уведомление
+        
+    } catch (error) {
+        console.error('Ошибка проверки новых эпизодов:', error);
+    }
+}
+
 // Обработка команды /start
 bot.start((ctx) => {
     ctx.reply(
@@ -670,6 +841,41 @@ bot.command('all', async (ctx) => {
     }
 });
 
+// Скрытая команда для тестирования уведомлений о новых эпизодах
+bot.command('test_episode', async (ctx) => {
+    try {
+        await ctx.reply('🧪 Тестирую систему уведомлений о новых эпизодах...');
+        
+        const stats = await loadStats();
+        
+        // Создаем тестовый эпизод
+        const testEpisode = {
+            title: 'Тестовый эпизод для проверки',
+            pubDate: new Date().toISOString(),
+            guid: 'test_episode_' + Date.now(),
+            itunes: { duration: '2500' } // ~42 минуты
+        };
+        
+        // Временно увеличиваем статистику для теста
+        const testStats = {
+            ...stats,
+            totalEpisodes: stats.totalEpisodes + 1,
+            totalHours: stats.totalHours + (2500 / 3600),
+            startDate: new Date(stats.startDate)
+        };
+        
+        const message = formatNewEpisodeMessage(testStats, testEpisode);
+        
+        await ctx.reply('📝 Тестовое уведомление:\n\n' + message);
+        
+        await ctx.reply(`📊 Текущая статистика:\n• Эпизодов: ${stats.totalEpisodes}\n• Часов: ${Math.round(stats.totalHours)}\n• Последняя проверка: ${new Date(stats.lastCheck).toLocaleString('ru-RU')}`);
+        
+    } catch (error) {
+        console.error('Ошибка тестирования:', error);
+        await ctx.reply('❌ Ошибка при тестировании системы уведомлений.');
+    }
+});
+
 // Обработка неизвестных команд
 bot.on('text', (ctx) => {
     ctx.reply('Неизвестная команда. Используйте /help для просмотра доступных команд.');
@@ -687,6 +893,16 @@ const PORT = process.env.PORT || 3000;
 
 bot.launch().then(() => {
     console.log('Бот успешно запущен!');
+    
+    // Инициализируем статистику
+    loadStats().then(stats => {
+        console.log(`📊 Текущая статистика: ${stats.totalEpisodes} эпизодов, ${Math.round(stats.totalHours)} часов`);
+    });
+    
+    // Запускаем мониторинг новых эпизодов каждые 10 минут
+    setInterval(checkForNewEpisodes, 10 * 60 * 1000);
+    console.log('🔍 Мониторинг новых эпизодов запущен (проверка каждые 10 минут)');
+    
 }).catch(err => {
     console.error('Ошибка запуска бота:', err);
 });
