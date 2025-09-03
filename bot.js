@@ -575,7 +575,7 @@ function formatNewEpisodeMessage(stats, newEpisode) {
         }
     }
     
-    return `🎉 Вышел новый выпуск!\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}!${episodeLink}`;
+    return `*Вышел новый выпуск*\n\nЭто ваш ${episodeCount}-й выпуск, вы записали уже ${totalHours} ${hourForm} подкастов. Вы делаете этот подкаст ${timeText}.${episodeLink}`;
 }
 
 // Функция для проверки новых эпизодов
@@ -853,33 +853,40 @@ bot.command('all', async (ctx) => {
 // Скрытая команда для тестирования уведомлений о новых эпизодах
 bot.command('test_episode', async (ctx) => {
     try {
-        await ctx.reply('🧪 Тестирую систему уведомлений о новых эпизодах...');
+        await ctx.reply('Тестирую систему уведомлений на основе реального последнего эпизода...');
         
         const stats = await loadStats();
+        const feed = await parser.parseURL(RSS_FEED_URL);
         
-        // Создаем тестовый эпизод
-        const testEpisode = {
-            title: 'Тестовый эпизод для проверки',
-            pubDate: new Date().toISOString(),
-            guid: 'test_episode_' + Date.now(),
-            itunes: { duration: '2500' } // ~42 минуты
-        };
+        if (!feed.items || feed.items.length === 0) {
+            await ctx.reply('Ошибка: RSS-лента пуста');
+            return;
+        }
         
-        // Симулируем статистику ПОСЛЕ добавления нового эпизода для теста
+        // Берем реальный последний эпизод из RSS
+        const latestEpisode = feed.items[0];
+        
+        // Проверяем его параметры
+        const duration = parseDurationToSeconds(latestEpisode.itunes?.duration);
+        const minutes = Math.round(duration / 60);
+        
+        await ctx.reply(`Последний эпизод в RSS:\n"${latestEpisode.title}"\nПродолжительность: ${minutes} минут`);
+        
+        // Симулируем, как будет выглядеть уведомление для этого эпизода
         const testStats = {
             ...stats,
-            totalEpisodes: stats.totalEpisodes + 1, // Показываем, как будет после нового эпизода
-            totalHours: stats.totalHours + (2500 / 3600),
+            totalEpisodes: stats.totalEpisodes + 1,
+            totalHours: stats.totalHours + (duration / 3600),
             startDate: new Date(stats.startDate)
         };
         
-        const message = formatNewEpisodeMessage(testStats, testEpisode);
+        const message = formatNewEpisodeMessage(testStats, latestEpisode);
         
-        await ctx.reply('📝 Тестовое уведомление (как будет выглядеть при новом эпизоде):\n\n' + message);
+        await ctx.reply('Тестовое уведомление на основе реального эпизода:\n\n' + message, { parse_mode: 'Markdown' });
         
     } catch (error) {
         console.error('Ошибка тестирования:', error);
-        await ctx.reply('❌ Ошибка при тестировании системы уведомлений.');
+        await ctx.reply('Ошибка при тестировании системы уведомлений.');
     }
 });
 
