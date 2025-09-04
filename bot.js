@@ -705,6 +705,90 @@ async function checkForNewEpisodes() {
     }
 }
 
+// Функция для отправки месячного отчета
+async function sendMonthlyReport() {
+    try {
+        console.log('Отправка месячного отчета...');
+        
+        // Получаем рецензии за прошлый месяц
+        const now = new Date();
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        
+        console.log(`Ищем рецензии за период: ${lastMonth.toLocaleDateString('ru-RU')} - ${thisMonth.toLocaleDateString('ru-RU')}`);
+        
+        // Создаем временный контекст для получения рецензий
+        const tempCtx = {
+            reply: (msg) => { console.log('Прогресс:', msg); return Promise.resolve({ chat: { id: 'temp' }, message_id: 1 }); },
+            telegram: {
+                editMessageText: () => Promise.resolve()
+            }
+        };
+        
+        const monthlyReviews = await getMonthlyReviews(tempCtx);
+        
+        // Фильтруем рецензии именно за прошлый месяц
+        const lastMonthReviews = monthlyReviews.filter(review => {
+            if (!review.updated) return false;
+            const reviewDate = new Date(review.updated);
+            return reviewDate >= lastMonth && reviewDate < thisMonth;
+        });
+        
+        console.log(`Найдено ${lastMonthReviews.length} рецензий за прошлый месяц`);
+        
+        let message;
+        if (lastMonthReviews.length === 0) {
+            message = 'С началом нового месяца вас! Не могу найти ни одну рецензию за прошлый месяц, поэтому пишу это сообщение просто так.';
+        } else {
+            message = `С началом нового месяца вас! Вот рецензии за прошлый месяц:`;
+        }
+        
+        console.log('Сообщение для отправки:', message);
+        console.log(`Будет отправлено ${lastMonthReviews.length} рецензий`);
+        
+        // TODO: Отправка во все чаты
+        // Пока только логируем
+        
+    } catch (error) {
+        console.error('Ошибка отправки месячного отчета:', error);
+    }
+}
+
+// Функция для проверки, нужно ли отправлять месячный отчет
+async function checkMonthlyReport() {
+    try {
+        const now = new Date();
+        
+        // Проверяем, что сегодня 1 число месяца
+        if (now.getDate() !== 1) {
+            return;
+        }
+        
+        // Проверяем, не отправляли ли уже отчет в этом месяце
+        const stats = await loadStats();
+        const lastReportDate = stats.lastMonthlyReport ? new Date(stats.lastMonthlyReport) : null;
+        
+        if (lastReportDate && 
+            lastReportDate.getFullYear() === now.getFullYear() && 
+            lastReportDate.getMonth() === now.getMonth()) {
+            console.log('Месячный отчет уже отправлен в этом месяце');
+            return;
+        }
+        
+        console.log('Пора отправить месячный отчет!');
+        
+        // Отправляем отчет
+        await sendMonthlyReport();
+        
+        // Обновляем дату последнего отчета
+        stats.lastMonthlyReport = now.toISOString();
+        await saveStats(stats);
+        
+    } catch (error) {
+        console.error('Ошибка проверки месячного отчета:', error);
+    }
+}
+
 // Обработка команды /start
 bot.start((ctx) => {
     ctx.reply(
@@ -955,6 +1039,22 @@ bot.command('test_episode', async (ctx) => {
     }
 });
 
+// Скрытая команда для тестирования месячного отчета
+bot.command('test_monthly', async (ctx) => {
+    try {
+        await ctx.reply('Тестирую месячный отчет...');
+        
+        // Принудительно запускаем отправку месячного отчета
+        await sendMonthlyReport();
+        
+        await ctx.reply('Тест месячного отчета завершен. Проверьте логи.');
+        
+    } catch (error) {
+        console.error('Ошибка тестирования месячного отчета:', error);
+        await ctx.reply('Ошибка при тестировании месячного отчета.');
+    }
+});
+
 // Обработка неизвестных команд
 bot.on('text', (ctx) => {
     ctx.reply('Неизвестная команда. Используйте /help для просмотра доступных команд.');
@@ -981,6 +1081,13 @@ bot.launch().then(() => {
     // Запускаем мониторинг новых эпизодов каждые 10 минут
     setInterval(checkForNewEpisodes, 10 * 60 * 1000);
     console.log('🔍 Мониторинг новых эпизодов запущен (проверка каждые 10 минут)');
+    
+    // Запускаем проверку месячных отчетов каждые 6 часов
+    setInterval(checkMonthlyReport, 6 * 60 * 60 * 1000);
+    console.log('📅 Мониторинг месячных отчетов запущен (проверка каждые 6 часов)');
+    
+    // Проверяем сразу при запуске
+    checkMonthlyReport();
     
 }).catch(err => {
     console.error('Ошибка запуска бота:', err);
