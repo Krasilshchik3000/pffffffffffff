@@ -353,8 +353,7 @@ function escapeMarkdown(text) {
 
 // Функция для форматирования рецензии в текст сообщения
 function formatReviewMessage(review, index) {
-    let message = `📝 Рецензия ${index + 1}\n\n`;
-    message += `📌 *${escapeMarkdown(cleanText(review.title || 'Без названия'))}*\n`;
+    let message = `📌 *${escapeMarkdown(cleanText(review.title || 'Без названия'))}*\n`;
     message += `👤 Автор: ${escapeMarkdown(cleanText(review.userName || 'Аноним'))}\n`;
     
     // Показываем источник, если он указан
@@ -392,7 +391,7 @@ function formatReviewMessage(review, index) {
     }
     message += `📅 Дата: ${dateStr}\n\n`;
     
-    message += `💬 *Текст рецензии:*\n${escapeMarkdown(cleanText(review.text || 'Без комментария'))}`;
+    message += `${escapeMarkdown(cleanText(review.text || 'Без комментария'))}`;
     
     return message;
 }
