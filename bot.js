@@ -706,8 +706,9 @@ async function checkForNewEpisodes() {
 }
 
 // Функция для отправки месячного отчета
-async function sendMonthlyReport() {
+async function sendMonthlyReport(testCtx = null) {
     try {
+        if (testCtx) await testCtx.reply('📅 Начинаю тест месячного отчета...');
         console.log('Отправка месячного отчета...');
         
         // Получаем рецензии за прошлый месяц
@@ -715,10 +716,12 @@ async function sendMonthlyReport() {
         const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         
-        console.log(`Ищем рецензии за период: ${lastMonth.toLocaleDateString('ru-RU')} - ${thisMonth.toLocaleDateString('ru-RU')}`);
+        const periodText = `${lastMonth.toLocaleDateString('ru-RU')} - ${thisMonth.toLocaleDateString('ru-RU')}`;
+        console.log(`Ищем рецензии за период: ${periodText}`);
+        if (testCtx) await testCtx.reply(`🔍 Ищу рецензии за период: ${periodText}`);
         
-        // Создаем временный контекст для получения рецензий
-        const tempCtx = {
+        // Создаем контекст для получения рецензий
+        const tempCtx = testCtx || {
             reply: (msg) => { console.log('Прогресс:', msg); return Promise.resolve({ chat: { id: 'temp' }, message_id: 1 }); },
             telegram: {
                 editMessageText: () => Promise.resolve()
@@ -735,6 +738,7 @@ async function sendMonthlyReport() {
         });
         
         console.log(`Найдено ${lastMonthReviews.length} рецензий за прошлый месяц`);
+        if (testCtx) await testCtx.reply(`📊 Найдено ${lastMonthReviews.length} рецензий за прошлый месяц`);
         
         let message;
         if (lastMonthReviews.length === 0) {
@@ -744,13 +748,31 @@ async function sendMonthlyReport() {
         }
         
         console.log('Сообщение для отправки:', message);
-        console.log(`Будет отправлено ${lastMonthReviews.length} рецензий`);
+        if (testCtx) {
+            await testCtx.reply(`📝 Итоговое сообщение:\n${message}`);
+            
+            if (lastMonthReviews.length > 0) {
+                await testCtx.reply(`📋 Будет отправлено ${lastMonthReviews.length} рецензий:`);
+                // Показываем первые 3 рецензии как пример
+                for (let i = 0; i < Math.min(3, lastMonthReviews.length); i++) {
+                    const review = lastMonthReviews[i];
+                    await testCtx.reply(`${i + 1}. "${review.title}" от ${review.userName} (${review.countryName})`);
+                }
+                if (lastMonthReviews.length > 3) {
+                    await testCtx.reply(`... и еще ${lastMonthReviews.length - 3} рецензий`);
+                }
+            }
+        }
         
         // TODO: Отправка во все чаты
         // Пока только логируем
         
+        return { message, reviews: lastMonthReviews };
+        
     } catch (error) {
         console.error('Ошибка отправки месячного отчета:', error);
+        if (testCtx) await testCtx.reply(`❌ Ошибка: ${error.message}`);
+        throw error;
     }
 }
 
@@ -777,7 +799,7 @@ async function checkMonthlyReport() {
         
         console.log('Пора отправить месячный отчет!');
         
-        // Отправляем отчет
+        // Отправляем отчет (без тестового контекста)
         await sendMonthlyReport();
         
         // Обновляем дату последнего отчета
@@ -1042,16 +1064,16 @@ bot.command('test_episode', async (ctx) => {
 // Скрытая команда для тестирования месячного отчета
 bot.command('test_monthly', async (ctx) => {
     try {
-        await ctx.reply('Тестирую месячный отчет...');
+        await ctx.reply('🧪 Тестирую месячный отчет с подробными логами...');
         
-        // Принудительно запускаем отправку месячного отчета
-        await sendMonthlyReport();
+        // Принудительно запускаем отправку месячного отчета с передачей контекста
+        const result = await sendMonthlyReport(ctx);
         
-        await ctx.reply('Тест месячного отчета завершен. Проверьте логи.');
+        await ctx.reply(`✅ Тест завершен!\n\n📋 Результат:\n• Сообщение: готово\n• Рецензий найдено: ${result.reviews.length}\n• Логи показаны выше`);
         
     } catch (error) {
         console.error('Ошибка тестирования месячного отчета:', error);
-        await ctx.reply('Ошибка при тестировании месячного отчета.');
+        await ctx.reply(`❌ Ошибка при тестировании: ${error.message}`);
     }
 });
 
