@@ -964,8 +964,6 @@ bot.command('month', async (ctx) => {
             }
         }
         
-        await ctx.reply(`✅ Все ${reviews.length} рецензий за месяц отправлены!`);
-        
     } catch (error) {
         console.error('Ошибка при обработке команды /month:', error);
         await ctx.reply('Произошла ошибка при получении месячных рецензий. Попробуйте позже.');
