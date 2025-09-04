@@ -204,7 +204,7 @@ async function getPodcastReviews(ctx, limit = 20) {
 }
 
 // Функция для получения рецензий за последний месяц
-async function getMonthlyReviews(ctx) {
+async function getMonthlyReviews(ctx, showProgress = true) {
     try {
         console.log('Получение рецензий за последний месяц...');
         
@@ -214,8 +214,11 @@ async function getMonthlyReviews(ctx) {
         const oneMonthAgo = new Date();
         oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
         
-        // Отправляем начальное сообщение о прогрессе
-        const progressMessage = await ctx.reply(`🗓️ Ищу рецензии за последний месяц...\nПроверяю ${totalCountries} стран. Это может занять 1-2 минуты.`);
+        // Отправляем начальное сообщение о прогрессе только если нужно
+        let progressMessage = null;
+        if (showProgress) {
+            progressMessage = await ctx.reply(`🗓️ Ищу рецензии за последний месяц...\nПроверяю ${totalCountries} стран. Это может занять 1-2 минуты.`);
+        }
         
         // Получаем рецензии из каждой страны
         for (const country of COUNTRIES) {
@@ -248,8 +251,8 @@ async function getMonthlyReviews(ctx) {
                 
                 processedCountries++;
                 
-                // Обновляем прогресс каждые 10 стран
-                if (processedCountries % 10 === 0 || processedCountries === totalCountries) {
+                // Обновляем прогресс каждые 10 стран (только если показываем прогресс)
+                if (showProgress && progressMessage && (processedCountries % 10 === 0 || processedCountries === totalCountries)) {
                     try {
                         await ctx.telegram.editMessageText(
                             progressMessage.chat.id,
@@ -280,16 +283,40 @@ async function getMonthlyReviews(ctx) {
         
         console.log(`Всего получено ${allReviews.length} рецензий за месяц из ${COUNTRIES.length} стран`);
         
-        // Финальное сообщение о завершении поиска
-        try {
-            await ctx.telegram.editMessageText(
-                progressMessage.chat.id,
-                progressMessage.message_id,
-                null,
-                `✅ Поиск завершен!\n📊 Проверено ${totalCountries} стран\n📝 Найдено ${allReviews.length} рецензий за последний месяц`
-            );
-        } catch (editError) {
-            // Игнорируем ошибки редактирования сообщения
+        // Финальное сообщение с правильными склонениями
+        const storeForm = getCorrectForm(totalCountries, ['стор', 'стора', 'сторов']);
+        const reviewForm = getCorrectForm(allReviews.length, ['рецензию', 'рецензии', 'рецензий']);
+        
+        let finalMessage;
+        if (allReviews.length === 0) {
+            const randomPhrases = [
+                'Это печально!',
+                'Эхх.',
+                'Дичь!',
+                'Че за бред.',
+                'С этим надо что-то делать.',
+                'Бывает.'
+            ];
+            const randomPhrase = randomPhrases[Math.floor(Math.random() * randomPhrases.length)];
+            finalMessage = `Я проверила ${totalCountries} ${storeForm} и не нашла ни одной рецензии. ${randomPhrase}`;
+        } else {
+            const reviewWord = allReviews.length === 1 ? 'она' : 'они';
+            finalMessage = `Я проверила ${totalCountries} ${storeForm} и нашла ${allReviews.length} ${reviewForm} за последний месяц. Вот ${reviewWord}:`;
+        }
+        
+        if (showProgress && progressMessage) {
+            try {
+                await ctx.telegram.editMessageText(
+                    progressMessage.chat.id,
+                    progressMessage.message_id,
+                    null,
+                    finalMessage
+                );
+            } catch (editError) {
+                await ctx.reply(finalMessage);
+            }
+        } else if (!showProgress) {
+            await ctx.reply(finalMessage);
         }
         
         return allReviews;
@@ -728,7 +755,7 @@ async function sendMonthlyReport(testCtx = null) {
             }
         };
         
-        const monthlyReviews = await getMonthlyReviews(tempCtx);
+        const monthlyReviews = await getMonthlyReviews(tempCtx, false); // Без показа прогресса для автоматического отчета
         
         // Фильтруем рецензии именно за прошлый месяц
         const lastMonthReviews = monthlyReviews.filter(review => {
@@ -738,22 +765,35 @@ async function sendMonthlyReport(testCtx = null) {
         });
         
         console.log(`Найдено ${lastMonthReviews.length} рецензий за прошлый месяц`);
-        if (testCtx) await testCtx.reply(`📊 Найдено ${lastMonthReviews.length} рецензий за прошлый месяц`);
+        
+        // Формируем сообщение с правильными склонениями
+        const totalCountries = COUNTRIES.length;
+        const storeForm = getCorrectForm(totalCountries, ['стор', 'стора', 'сторов']);
+        const reviewForm = getCorrectForm(lastMonthReviews.length, ['рецензию', 'рецензии', 'рецензий']);
         
         let message;
         if (lastMonthReviews.length === 0) {
-            message = 'С началом нового месяца вас! Не могу найти ни одну рецензию за прошлый месяц, поэтому пишу это сообщение просто так.';
+            const randomPhrases = [
+                'Это печально!',
+                'Эхх.',
+                'Дичь!',
+                'Че за бред.',
+                'С этим надо что-то делать.',
+                'Бывает.'
+            ];
+            const randomPhrase = randomPhrases[Math.floor(Math.random() * randomPhrases.length)];
+            message = `С началом нового месяца вас! Я проверила ${totalCountries} ${storeForm} и не нашла ни одной рецензии. ${randomPhrase}`;
         } else {
-            message = `С началом нового месяца вас! Вот рецензии за прошлый месяц:`;
+            const reviewWord = lastMonthReviews.length === 1 ? 'она' : 'они';
+            message = `С началом нового месяца вас! Я проверила ${totalCountries} ${storeForm} и нашла ${lastMonthReviews.length} ${reviewForm} за прошлый месяц. Вот ${reviewWord}:`;
         }
         
         console.log('Сообщение для отправки:', message);
         if (testCtx) {
-            await testCtx.reply(`📝 Итоговое сообщение:\n${message}`);
+            await testCtx.reply(`📝 Итоговое сообщение для месячного отчета:\n${message}`);
             
             if (lastMonthReviews.length > 0) {
-                await testCtx.reply(`📋 Будет отправлено ${lastMonthReviews.length} рецензий:`);
-                // Показываем первые 3 рецензии как пример
+                await testCtx.reply(`📋 Примеры рецензий (первые 3):`);
                 for (let i = 0; i < Math.min(3, lastMonthReviews.length); i++) {
                     const review = lastMonthReviews[i];
                     await testCtx.reply(`${i + 1}. "${review.title}" от ${review.userName} (${review.countryName})`);
@@ -888,16 +928,15 @@ bot.command('reviews', async (ctx) => {
 // Обработка команды /month
 bot.command('month', async (ctx) => {
     try {
-        // Получаем месячные рецензии
-        const reviews = await getMonthlyReviews(ctx);
+        // Получаем месячные рецензии (с показом прогресса)
+        const reviews = await getMonthlyReviews(ctx, true);
         
+        // Если рецензий нет, функция уже отправила финальное сообщение с рандомной фразой
         if (reviews.length === 0) {
-            await ctx.reply('Рецензии за последний месяц не найдены.');
             return;
         }
         
-        // Отправляем заголовочное сообщение
-        await ctx.reply(`🗓️ *Все ${reviews.length} рецензий за последний месяц подкаста "Два по цене одного"*\n\nОтправляю по одной рецензии\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        // Если рецензии есть, функция уже отправила сообщение "Вот они:", теперь отправляем рецензии
         
         // Отправляем каждую рецензию отдельным сообщением
         for (let i = 0; i < reviews.length; i++) {
