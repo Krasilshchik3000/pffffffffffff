@@ -672,26 +672,37 @@ async function formatNewEpisodeMessage(stats, newEpisode) {
 }
 
 // Функция для проверки новых эпизодов
-async function checkForNewEpisodes() {
+async function checkForNewEpisodes(testCtx = null) {
     try {
-        console.log('Проверка новых эпизодов...');
+        const logMsg = (msg) => {
+            console.log(msg);
+            if (testCtx) testCtx.reply(`📝 ${msg}`);
+        };
+        
+        logMsg('Проверка новых эпизодов...');
         
         const stats = await loadStats();
+        logMsg(`Загружена статистика: ${stats.totalEpisodes} эпизодов, lastEpisodeId: ${stats.lastEpisodeId || 'НЕ УСТАНОВЛЕН'}`);
+        
         const feed = await parser.parseURL(RSS_FEED_URL);
+        logMsg(`RSS загружен: ${feed.items.length} эпизодов в ленте`);
         
         if (!feed.items || feed.items.length === 0) {
-            console.log('RSS-лента пуста');
+            logMsg('RSS-лента пуста');
             return;
         }
         
         // Берем самый новый эпизод
         const latestEpisode = feed.items[0];
+        logMsg(`Последний эпизод в RSS: "${latestEpisode.title}" (GUID: ${latestEpisode.guid})`);
         
         // Проверяем, новый ли это эпизод
         if (stats.lastEpisodeId === latestEpisode.guid) {
-            console.log('Новых эпизодов нет');
+            logMsg('Этот эпизод уже обработан ранее');
             return;
         }
+        
+        logMsg(`НОВЫЙ ЭПИЗОД ОБНАРУЖЕН! Предыдущий ID: ${stats.lastEpisodeId}, новый ID: ${latestEpisode.guid}`);
         
         // Проверяем, что это не трейлер и длиннее 5 минут
         const title = latestEpisode.title?.toLowerCase() || '';
@@ -699,17 +710,23 @@ async function checkForNewEpisodes() {
         const duration = parseDurationToSeconds(latestEpisode.itunes?.duration);
         const minutes = duration / 60;
         
+        logMsg(`Проверка эпизода: трейлер=${isTrailer}, продолжительность=${Math.round(minutes)} минут`);
+        
         if (isTrailer || minutes < 5) {
-            console.log(`Пропускаем: "${latestEpisode.title}" (трейлер или <5 мин)`);
+            logMsg(`Пропускаем: "${latestEpisode.title}" (трейлер или <5 мин)`);
             // Обновляем ID последнего эпизода, но не статистику
             stats.lastEpisodeId = latestEpisode.guid;
             await saveStats(stats);
+            logMsg('Статистика обновлена (ID сохранен, но счетчики не изменены)');
             return;
         }
         
-        console.log(`🎉 Найден новый эпизод: "${latestEpisode.title}"`);
+        logMsg(`✅ Эпизод прошел проверки! Обновляю статистику...`);
         
         // Обновляем статистику
+        const oldEpisodes = stats.totalEpisodes;
+        const oldHours = stats.totalHours;
+        
         stats.totalEpisodes += 1;
         stats.totalHours += duration / 3600; // добавляем часы
         stats.lastEpisodeId = latestEpisode.guid;
@@ -717,17 +734,26 @@ async function checkForNewEpisodes() {
         
         await saveStats(stats);
         
+        logMsg(`Статистика обновлена: ${oldEpisodes} → ${stats.totalEpisodes} эпизодов, ${oldHours.toFixed(2)} → ${stats.totalHours.toFixed(2)} часов`);
+        
         // Формируем сообщение
+        logMsg('Формирую уведомление...');
         const message = await formatNewEpisodeMessage(stats, latestEpisode);
         
-        console.log('Отправка уведомлений во все чаты...');
-        console.log('Сообщение:', message);
+        logMsg('Готово к отправке уведомления:');
+        logMsg(message);
         
-        // Здесь будет отправка во все чаты (пока логируем)
-        // TODO: Получить список всех чатов и отправить уведомление
+        if (testCtx) {
+            await testCtx.reply('📤 Тестовое уведомление:\n\n' + message, { parse_mode: 'Markdown' });
+        }
+        
+        // TODO: Отправка во все чаты
+        // Пока только логируем
         
     } catch (error) {
-        console.error('Ошибка проверки новых эпизодов:', error);
+        const errorMsg = `Ошибка проверки новых эпизодов: ${error.message}`;
+        console.error(errorMsg);
+        if (testCtx) testCtx.reply(`❌ ${errorMsg}`);
     }
 }
 
@@ -1142,10 +1168,10 @@ bot.command('check_rss', async (ctx) => {
             await ctx.reply(`❌ Ошибка статистики: ${statsError.message}`);
         }
         
-        // Запускаем ручную проверку
-        await ctx.reply('🔄 Запускаю ручную проверку новых эпизодов...');
-        await checkForNewEpisodes();
-        await ctx.reply('✅ Ручная проверка завершена. Проверьте логи выше.');
+        // Запускаем ручную проверку с подробным логированием
+        await ctx.reply('🔄 Запускаю ручную проверку новых эпизодов с подробными логами...');
+        await checkForNewEpisodes(ctx);
+        await ctx.reply('✅ Ручная проверка завершена.');
         
     } catch (error) {
         console.error('Ошибка диагностики:', error);
