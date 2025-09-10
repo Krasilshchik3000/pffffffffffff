@@ -747,11 +747,11 @@ async function checkForNewEpisodes(testCtx = null) {
         logMsg('Формирую уведомление...');
         const message = await formatNewEpisodeMessage(stats, latestEpisode);
         
-        logMsg('Готово к отправке уведомления:');
-        logMsg(message);
-        
         if (testCtx) {
             await testCtx.reply('📤 Тестовое уведомление:\n\n' + message, { parse_mode: 'Markdown' });
+        } else {
+            logMsg('Готово к отправке уведомления:');
+            logMsg(message);
         }
         
         // TODO: Отправка во все чаты
@@ -901,11 +901,15 @@ bot.help((ctx) => {
         'Доступные команды:\n\n' +
         '🍎 /reviews - последние 20 рецензий из Apple Podcasts\n' +
         '🗓️ /month - все рецензии за последний месяц\n' +
-        '🌍 /all - ВСЕ доступные рецензии (73 страны × 3 страницы)\n' +
+        '🌍 /all - ВСЕ доступные рецензии (76 стран × 3 страницы)\n' +
         '❓ /help - показать эту справку\n\n' +
-        'Подкаст: "Два по цене одного"\n\n' +
-        'Источники отзывов:\n' +
-        '🍎 Apple Podcasts (73 страны, до ~1000 рецензий)'
+        '🔧 Тестовые команды:\n' +
+        '🧪 /run_tests - полное тестирование системы\n' +
+        '🔍 /check_rss - диагностика RSS-мониторинга\n' +
+        '📺 /test_episode - тест уведомлений о новых эпизодах\n' +
+        '📅 /test_monthly - тест месячных отчетов\n\n' +
+        'Подкаст: "Два по цене одного"\n' +
+        'Источники: 🍎 Apple Podcasts (76 стран)'
     );
 });
 
@@ -1183,6 +1187,163 @@ bot.command('check_rss', async (ctx) => {
     } catch (error) {
         console.error('Ошибка диагностики:', error);
         await ctx.reply(`❌ Ошибка диагностики: ${error.message}`);
+    }
+});
+
+// Система тестирования всех функций бота
+bot.command('run_tests', async (ctx) => {
+    try {
+        await ctx.reply('🧪 Запускаю полное тестирование системы...\n\nЭто займет 2-3 минуты. Буду отправлять отчеты по каждому тесту.');
+        
+        const testResults = [];
+        let testNumber = 1;
+        
+        // Тест 1: RSS-мониторинг
+        try {
+            await ctx.reply(`🧪 Тест ${testNumber++}: RSS-мониторинг`);
+            const feed = await parser.parseURL(RSS_FEED_URL);
+            const latest = feed.items[0];
+            const duration = parseDurationToSeconds(latest.itunes?.duration);
+            
+            testResults.push({
+                name: 'RSS-мониторинг',
+                status: '✅ ПРОШЕЛ',
+                details: `${feed.items.length} эпизодов, последний "${latest.title}" (${Math.round(duration/60)} мин)`
+            });
+            await ctx.reply('✅ RSS работает корректно');
+        } catch (error) {
+            testResults.push({
+                name: 'RSS-мониторинг', 
+                status: '❌ ОШИБКА',
+                details: error.message
+            });
+            await ctx.reply(`❌ Ошибка RSS: ${error.message}`);
+        }
+        
+        // Тест 2: Система статистики
+        try {
+            await ctx.reply(`🧪 Тест ${testNumber++}: Система статистики`);
+            const stats = await loadStats();
+            const isDateValid = stats.startDate instanceof Date;
+            
+            testResults.push({
+                name: 'Система статистики',
+                status: isDateValid ? '✅ ПРОШЕЛ' : '⚠️ ПРОБЛЕМА',
+                details: `${stats.totalEpisodes} эпизодов, ${Math.round(stats.totalHours*60)/60} часов, дата: ${isDateValid ? 'OK' : 'НЕ Date объект'}`
+            });
+            await ctx.reply(isDateValid ? '✅ Статистика работает' : '⚠️ Проблема с датой в статистике');
+        } catch (error) {
+            testResults.push({
+                name: 'Система статистики',
+                status: '❌ ОШИБКА', 
+                details: error.message
+            });
+            await ctx.reply(`❌ Ошибка статистики: ${error.message}`);
+        }
+        
+        // Тест 3: Форматирование уведомлений
+        try {
+            await ctx.reply(`🧪 Тест ${testNumber++}: Форматирование уведомлений`);
+            const stats = await loadStats();
+            const testEpisode = {
+                title: 'Тестовый эпизод',
+                pubDate: new Date().toISOString(),
+                itunes: { duration: '3000' }
+            };
+            
+            const message = await formatNewEpisodeMessage(stats, testEpisode);
+            const hasCorrectFormat = message.includes('*Вышел новый выпуск*') && 
+                                   message.includes('-й выпуск') &&
+                                   message.includes('часов') || message.includes('час');
+            
+            testResults.push({
+                name: 'Форматирование уведомлений',
+                status: hasCorrectFormat ? '✅ ПРОШЕЛ' : '❌ ОШИБКА',
+                details: hasCorrectFormat ? 'Формат корректный' : 'Неверный формат сообщения'
+            });
+            await ctx.reply(hasCorrectFormat ? '✅ Форматирование работает' : '❌ Ошибка форматирования');
+        } catch (error) {
+            testResults.push({
+                name: 'Форматирование уведомлений',
+                status: '❌ ОШИБКА',
+                details: error.message
+            });
+            await ctx.reply(`❌ Ошибка форматирования: ${error.message}`);
+        }
+        
+        // Тест 4: Склонения
+        try {
+            await ctx.reply(`🧪 Тест ${testNumber++}: Система склонений`);
+            const tests = [
+                { num: 1, expected: 'стор', forms: ['стор', 'стора', 'сторов'] },
+                { num: 2, expected: 'стора', forms: ['стор', 'стора', 'сторов'] },
+                { num: 5, expected: 'сторов', forms: ['стор', 'стора', 'сторов'] },
+                { num: 21, expected: 'стор', forms: ['стор', 'стора', 'сторов'] }
+            ];
+            
+            let allCorrect = true;
+            for (const test of tests) {
+                const result = getCorrectForm(test.num, test.forms);
+                if (result !== test.expected) {
+                    allCorrect = false;
+                    break;
+                }
+            }
+            
+            testResults.push({
+                name: 'Система склонений',
+                status: allCorrect ? '✅ ПРОШЕЛ' : '❌ ОШИБКА',
+                details: allCorrect ? 'Все склонения корректны' : 'Ошибки в склонениях'
+            });
+            await ctx.reply(allCorrect ? '✅ Склонения работают' : '❌ Ошибка склонений');
+        } catch (error) {
+            testResults.push({
+                name: 'Система склонений',
+                status: '❌ ОШИБКА',
+                details: error.message
+            });
+            await ctx.reply(`❌ Ошибка склонений: ${error.message}`);
+        }
+        
+        // Тест 5: Podcast.ru парсинг
+        try {
+            await ctx.reply(`🧪 Тест ${testNumber++}: Парсинг podcast.ru`);
+            const testLink = await getPodcastRuEpisodeLink('Подались на сотни вакансий');
+            
+            testResults.push({
+                name: 'Парсинг podcast.ru',
+                status: testLink ? '✅ ПРОШЕЛ' : '⚠️ НЕ НАЙДЕН',
+                details: testLink ? `Ссылка: ${testLink}` : 'Ссылка не найдена'
+            });
+            await ctx.reply(testLink ? `✅ Парсинг работает: ${testLink}` : '⚠️ Ссылка не найдена');
+        } catch (error) {
+            testResults.push({
+                name: 'Парсинг podcast.ru',
+                status: '❌ ОШИБКА',
+                details: error.message
+            });
+            await ctx.reply(`❌ Ошибка парсинга: ${error.message}`);
+        }
+        
+        // Финальный отчет
+        await ctx.reply('📊 ИТОГОВЫЙ ОТЧЕТ ТЕСТИРОВАНИЯ:');
+        
+        let passedTests = 0;
+        let totalTests = testResults.length;
+        
+        for (const test of testResults) {
+            await ctx.reply(`${test.status} ${test.name}\n${test.details}`);
+            if (test.status.includes('✅')) passedTests++;
+        }
+        
+        const overallStatus = passedTests === totalTests ? '🎉 ВСЕ ТЕСТЫ ПРОШЛИ' : 
+                             passedTests > totalTests / 2 ? '⚠️ ЕСТЬ ПРОБЛЕМЫ' : '🚨 КРИТИЧЕСКИЕ ОШИБКИ';
+        
+        await ctx.reply(`\n${overallStatus}\n\n📈 Результат: ${passedTests}/${totalTests} тестов прошли\n\n${passedTests === totalTests ? 'Система готова к продакшену!' : 'Требуются исправления!'}`);
+        
+    } catch (error) {
+        console.error('Ошибка системы тестирования:', error);
+        await ctx.reply(`❌ Критическая ошибка тестирования: ${error.message}`);
     }
 });
 
