@@ -578,7 +578,14 @@ async function getPodcastRuEpisodeLink(episodeTitle) {
 async function loadStats() {
     try {
         const data = await fs.readFile(STATS_FILE, 'utf8');
-        return JSON.parse(data);
+        const stats = JSON.parse(data);
+        
+        // Преобразуем строку даты обратно в объект Date
+        if (stats.startDate && typeof stats.startDate === 'string') {
+            stats.startDate = new Date(stats.startDate);
+        }
+        
+        return stats;
     } catch (error) {
         // Если файл не существует, создаем базовую статистику
         const initialStats = {
