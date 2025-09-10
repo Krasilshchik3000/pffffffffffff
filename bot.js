@@ -1113,6 +1113,46 @@ bot.command('test_monthly', async (ctx) => {
     }
 });
 
+// Скрытая команда для диагностики мониторинга эпизодов
+bot.command('check_rss', async (ctx) => {
+    try {
+        await ctx.reply('🔍 Проверяю систему мониторинга RSS...');
+        
+        // Проверяем RSS-ленту
+        try {
+            const feed = await parser.parseURL(RSS_FEED_URL);
+            await ctx.reply(`📡 RSS-лента доступна. Найдено ${feed.items.length} эпизодов`);
+            
+            if (feed.items.length > 0) {
+                const latest = feed.items[0];
+                const duration = parseDurationToSeconds(latest.itunes?.duration);
+                const minutes = Math.round(duration / 60);
+                
+                await ctx.reply(`🎧 Последний эпизод:\n"${latest.title}"\nДата: ${new Date(latest.pubDate).toLocaleString('ru-RU')}\nПродолжительность: ${minutes} минут\nGUID: ${latest.guid}`);
+            }
+        } catch (rssError) {
+            await ctx.reply(`❌ Ошибка RSS: ${rssError.message}`);
+        }
+        
+        // Проверяем файл статистики
+        try {
+            const stats = await loadStats();
+            await ctx.reply(`📊 Статистика загружена:\n• Эпизодов: ${stats.totalEpisodes}\n• Часов: ${Math.round(stats.totalHours * 60) / 60}\n• Последний ID: ${stats.lastEpisodeId || 'не установлен'}\n• Последняя проверка: ${stats.lastCheck ? new Date(stats.lastCheck).toLocaleString('ru-RU') : 'никогда'}`);
+        } catch (statsError) {
+            await ctx.reply(`❌ Ошибка статистики: ${statsError.message}`);
+        }
+        
+        // Запускаем ручную проверку
+        await ctx.reply('🔄 Запускаю ручную проверку новых эпизодов...');
+        await checkForNewEpisodes();
+        await ctx.reply('✅ Ручная проверка завершена. Проверьте логи выше.');
+        
+    } catch (error) {
+        console.error('Ошибка диагностики:', error);
+        await ctx.reply(`❌ Ошибка диагностики: ${error.message}`);
+    }
+});
+
 // Обработка неизвестных команд
 bot.on('text', (ctx) => {
     ctx.reply('Неизвестная команда. Используйте /help для просмотра доступных команд.');
