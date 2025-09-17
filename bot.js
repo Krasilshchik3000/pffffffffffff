@@ -1509,22 +1509,110 @@ bot.command('run_tests', async (ctx) => {
 bot.action('cmd_reviews', async (ctx) => {
     await ctx.answerCbQuery();
     await addChatToSubscriptions(ctx.chat.id);
-    const reviews = await getPodcastReviews(ctx);
-    // Далее как в команде /reviews...
+    
+    try {
+        const reviews = await getPodcastReviews(ctx);
+        
+        if (reviews.length === 0) {
+            await ctx.reply('Рецензии не найдены.');
+            return;
+        }
+        
+        // Отправляем каждую рецензию
+        for (let i = 0; i < reviews.length; i++) {
+            const reviewMessage = formatReviewMessage(reviews[i], i);
+            
+            try {
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
+                if (i < reviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            } catch (msgError) {
+                const plainMessage = reviewMessage.replace(/\*/g, '');
+                await ctx.reply(plainMessage);
+            }
+        }
+    } catch (error) {
+        await ctx.reply('Произошла ошибка при получении рецензий.');
+    }
 });
 
 bot.action('cmd_month', async (ctx) => {
     await ctx.answerCbQuery();
     await addChatToSubscriptions(ctx.chat.id);
-    const reviews = await getMonthlyReviews(ctx, true);
-    // Далее как в команде /month...
+    
+    try {
+        const reviews = await getMonthlyReviews(ctx, true);
+        
+        if (reviews.length === 0) {
+            return; // Функция уже отправила сообщение
+        }
+        
+        // Отправляем каждую рецензию
+        for (let i = 0; i < reviews.length; i++) {
+            const reviewMessage = formatReviewMessage(reviews[i], i);
+            
+            try {
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
+                if (i < reviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            } catch (msgError) {
+                const plainMessage = reviewMessage.replace(/\*/g, '');
+                await ctx.reply(plainMessage);
+            }
+        }
+    } catch (error) {
+        await ctx.reply('Произошла ошибка при получении месячных рецензий.');
+    }
 });
 
 bot.action('cmd_all', async (ctx) => {
     await ctx.answerCbQuery();
     await addChatToSubscriptions(ctx.chat.id);
-    const reviews = await getAllPossibleReviews(ctx);
-    // Далее как в команде /all...
+    
+    try {
+        const reviews = await getAllPossibleReviews(ctx);
+        
+        if (reviews.length === 0) {
+            await ctx.reply('Рецензии не найдены.');
+            return;
+        }
+        
+        // Предупреждение о большом количестве
+        if (reviews.length > 100) {
+            const estimatedMinutes = Math.ceil(reviews.length * 1.5 / 60 + Math.floor(reviews.length / 20) * 10 / 60);
+            await ctx.reply(`⚠️ *Внимание!* Найдено ${reviews.length} рецензий\\!\n\nОтправка займет ~${estimatedMinutes} минут с паузами\\.\n\nНачинаю отправку\\.\\.\\.`, { parse_mode: 'MarkdownV2' });
+        }
+        
+        // Отправляем каждую рецензию
+        for (let i = 0; i < reviews.length; i++) {
+            const reviewMessage = formatReviewMessage(reviews[i], i);
+            
+            try {
+                await ctx.reply(reviewMessage, { parse_mode: 'Markdown' });
+                
+                if (i < reviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+                
+                // Паузы каждые 20 сообщений
+                if ((i + 1) % 20 === 0 && i < reviews.length - 1) {
+                    await ctx.reply(`⏸️ Пауза... Отправлено ${i + 1} из ${reviews.length}`);
+                    await new Promise(resolve => setTimeout(resolve, 10000));
+                }
+                
+            } catch (msgError) {
+                const plainMessage = reviewMessage.replace(/\*/g, '');
+                await ctx.reply(plainMessage);
+            }
+        }
+        
+        await ctx.reply(`✅ Все ${reviews.length} рецензий отправлены!`);
+        
+    } catch (error) {
+        await ctx.reply('Произошла ошибка при получении всех рецензий.');
+    }
 });
 
 bot.action('cmd_help', async (ctx) => {
