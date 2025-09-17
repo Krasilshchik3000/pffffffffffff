@@ -909,8 +909,28 @@ async function sendMonthlyReport(testCtx = null) {
             }
         }
         
-        // TODO: Отправка во все чаты
-        // Пока только логируем
+        // Отправляем месячный отчет во все чаты
+        if (lastMonthReviews.length === 0) {
+            // Отправляем сообщение без рецензий
+            const sendResult = await sendToAllChats(message);
+            console.log(`Месячный отчет (без рецензий) отправлен: ${sendResult.successCount} чатов`);
+        } else {
+            // Отправляем заголовочное сообщение
+            const headerResult = await sendToAllChats(message);
+            console.log(`Заголовок месячного отчета отправлен в ${headerResult.successCount} чатов`);
+            
+            // Отправляем каждую рецензию
+            for (let i = 0; i < lastMonthReviews.length; i++) {
+                const reviewMessage = formatReviewMessage(lastMonthReviews[i], i);
+                await sendToAllChats(reviewMessage, 'Markdown');
+                
+                // Небольшая задержка между рецензиями
+                if (i < lastMonthReviews.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+            console.log(`Все ${lastMonthReviews.length} рецензий месячного отчета отправлены`);
+        }
         
         return { message, reviews: lastMonthReviews };
         
@@ -961,14 +981,28 @@ bot.start(async (ctx) => {
     // Автоматически подписываем чат на уведомления
     await addChatToSubscriptions(ctx.chat.id);
     
+    const keyboard = {
+        inline_keyboard: [
+            [
+                { text: '🍎 Последние 20 рецензий', callback_data: 'cmd_reviews' },
+                { text: '🗓️ Рецензии за месяц', callback_data: 'cmd_month' }
+            ],
+            [
+                { text: '🌍 ВСЕ рецензии', callback_data: 'cmd_all' },
+                { text: '❓ Справка', callback_data: 'cmd_help' }
+            ],
+            [
+                { text: '🔧 Тестирование', callback_data: 'cmd_tests' },
+                { text: '📊 Статистика', callback_data: 'cmd_stats' }
+            ]
+        ]
+    };
+    
     ctx.reply(
         'Привет! Я бот для получения рецензий подкаста "Два по цене одного".\n\n' +
-        'Команды:\n' +
-        '/reviews - получить последние 20 рецензий из Apple Podcasts\n' +
-        '/month - получить все рецензии за последний месяц\n' +
-        '/all - получить ВСЕ доступные рецензии (может быть много!)\n' +
-        '/help - показать справку\n\n' +
-        '🔔 Вы автоматически подписаны на уведомления о новых эпизодах!'
+        '🔔 Вы автоматически подписаны на уведомления о новых эпизодах!\n\n' +
+        'Выберите действие:',
+        { reply_markup: keyboard }
     );
 });
 
@@ -1468,6 +1502,94 @@ bot.command('run_tests', async (ctx) => {
     } catch (error) {
         console.error('Ошибка системы тестирования:', error);
         await ctx.reply(`❌ Критическая ошибка тестирования: ${error.message}`);
+    }
+});
+
+// Обработчики кнопок меню
+bot.action('cmd_reviews', async (ctx) => {
+    await ctx.answerCbQuery();
+    await addChatToSubscriptions(ctx.chat.id);
+    const reviews = await getPodcastReviews(ctx);
+    // Далее как в команде /reviews...
+});
+
+bot.action('cmd_month', async (ctx) => {
+    await ctx.answerCbQuery();
+    await addChatToSubscriptions(ctx.chat.id);
+    const reviews = await getMonthlyReviews(ctx, true);
+    // Далее как в команде /month...
+});
+
+bot.action('cmd_all', async (ctx) => {
+    await ctx.answerCbQuery();
+    await addChatToSubscriptions(ctx.chat.id);
+    const reviews = await getAllPossibleReviews(ctx);
+    // Далее как в команде /all...
+});
+
+bot.action('cmd_help', async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.reply(
+        'Доступные команды:\n\n' +
+        '🍎 /reviews - последние 20 рецензий из Apple Podcasts\n' +
+        '🗓️ /month - все рецензии за последний месяц\n' +
+        '🌍 /all - ВСЕ доступные рецензии (76 стран × 3 страницы)\n' +
+        '❓ /help - показать эту справку\n\n' +
+        '🔧 Тестовые команды:\n' +
+        '🧪 /run_tests - полное тестирование системы\n' +
+        '🔍 /check_rss - диагностика RSS-мониторинга\n' +
+        '📺 /test_episode - тест уведомлений о новых эпизодах\n' +
+        '📅 /test_monthly - тест месячных отчетов\n' +
+        '📤 /send_latest - отправить уведомление о последнем эпизоде\n\n' +
+        'Подкаст: "Два по цене одного"\n' +
+        'Источники: 🍎 Apple Podcasts (76 стран)'
+    );
+});
+
+bot.action('cmd_tests', async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.reply('🧪 Запускаю полное тестирование...');
+    // Запускаем тесты как в команде /run_tests
+    bot.handleUpdate({ message: { text: '/run_tests', chat: ctx.chat, from: ctx.from } });
+});
+
+bot.action('cmd_stats', async (ctx) => {
+    await ctx.answerCbQuery();
+    try {
+        const stats = await loadStats();
+        const chats = await loadChats();
+        
+        const totalMinutes = Math.round(stats.totalHours * 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        
+        const timeSince = calculateTimeSinceStart(stats.startDate, new Date());
+        const yearForm = getCorrectForm(timeSince.years, ['год', 'года', 'лет']);
+        const monthForm = getCorrectForm(timeSince.months, ['месяц', 'месяца', 'месяцев']);
+        const dayForm = getCorrectForm(timeSince.days, ['день', 'дня', 'дней']);
+        
+        let durationText = '';
+        if (timeSince.years > 0) durationText += `${timeSince.years} ${yearForm}`;
+        if (timeSince.months > 0) {
+            if (durationText) durationText += ' ';
+            durationText += `${timeSince.months} ${monthForm}`;
+        }
+        if (timeSince.days > 0) {
+            if (durationText) durationText += ' ';
+            durationText += `${timeSince.days} ${dayForm}`;
+        }
+        
+        ctx.reply(
+            `📊 *Статистика подкаста "Два по цене одного"*\n\n` +
+            `📺 Эпизодов: ${stats.totalEpisodes}\n` +
+            `⏱️ Записано: ${hours} часов ${minutes} минут\n` +
+            `📅 Работают: ${durationText}\n` +
+            `🔔 Подписчиков: ${chats.subscribedChats.length}\n` +
+            `🔍 Последняя проверка: ${stats.lastCheck ? new Date(stats.lastCheck).toLocaleString('ru-RU') : 'никогда'}`,
+            { parse_mode: 'Markdown' }
+        );
+    } catch (error) {
+        ctx.reply(`❌ Ошибка получения статистики: ${error.message}`);
     }
 });
 
