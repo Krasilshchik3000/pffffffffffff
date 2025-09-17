@@ -1696,8 +1696,22 @@ bot.catch((err, ctx) => {
 console.log('Запуск бота...');
 const PORT = process.env.PORT || 3000;
 
-bot.launch().then(() => {
+bot.launch().then(async () => {
     console.log('Бот успешно запущен!');
+    
+    // Настраиваем меню команд
+    await bot.telegram.setMyCommands([
+        { command: 'reviews', description: '🍎 Последние 20 рецензий из Apple Podcasts' },
+        { command: 'month', description: '🗓️ Все рецензии за последний месяц' },
+        { command: 'all', description: '🌍 ВСЕ доступные рецензии (может быть много!)' },
+        { command: 'help', description: '❓ Справка по командам' },
+        { command: 'run_tests', description: '🧪 Полное тестирование системы' },
+        { command: 'check_rss', description: '🔍 Диагностика RSS-мониторинга' },
+        { command: 'test_episode', description: '📺 Тест уведомлений о новых эпизодах' },
+        { command: 'test_monthly', description: '📅 Тест месячных отчетов' },
+        { command: 'send_latest', description: '📤 Отправить уведомление о последнем эпизоде' }
+    ]);
+    console.log('📋 Меню команд настроено');
     
     // Инициализируем статистику
     loadStats().then(stats => {
