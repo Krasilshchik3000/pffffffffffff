@@ -23,8 +23,9 @@ const PODCAST_STATS = {
     startDate: new Date('2018-04-12') // 12 апреля 2018 года
 };
 
-// Файл для хранения текущей статистики
+// Файлы для хранения данных
 const STATS_FILE = path.join(__dirname, 'podcast_stats.json');
+const CHATS_FILE = path.join(__dirname, 'subscribed_chats.json');
 
 
 
@@ -606,6 +607,80 @@ async function saveStats(stats) {
     }
 }
 
+// Функции для работы с подписанными чатами
+async function loadChats() {
+    try {
+        const data = await fs.readFile(CHATS_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        // Если файл не существует, создаем пустой список
+        const initialChats = { subscribedChats: [] };
+        await saveChats(initialChats);
+        return initialChats;
+    }
+}
+
+async function saveChats(chats) {
+    try {
+        await fs.writeFile(CHATS_FILE, JSON.stringify(chats, null, 2), 'utf8');
+    } catch (error) {
+        console.error('Ошибка сохранения чатов:', error);
+    }
+}
+
+async function addChatToSubscriptions(chatId) {
+    try {
+        const chats = await loadChats();
+        if (!chats.subscribedChats.includes(chatId)) {
+            chats.subscribedChats.push(chatId);
+            await saveChats(chats);
+            console.log(`Чат ${chatId} добавлен в подписки`);
+        }
+    } catch (error) {
+        console.error('Ошибка добавления чата:', error);
+    }
+}
+
+// Функция для отправки сообщения во все подписанные чаты
+async function sendToAllChats(message, parseMode = null) {
+    try {
+        const chats = await loadChats();
+        console.log(`Отправка сообщения в ${chats.subscribedChats.length} чатов...`);
+        
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (const chatId of chats.subscribedChats) {
+            try {
+                const options = parseMode ? { parse_mode: parseMode } : {};
+                await bot.telegram.sendMessage(chatId, message, options);
+                successCount++;
+                console.log(`✅ Отправлено в чат ${chatId}`);
+            } catch (sendError) {
+                errorCount++;
+                console.error(`❌ Ошибка отправки в чат ${chatId}:`, sendError.message);
+                
+                // Если чат заблокировал бота или удален, убираем его из подписок
+                if (sendError.description && 
+                    (sendError.description.includes('blocked') || 
+                     sendError.description.includes('not found') ||
+                     sendError.description.includes('deactivated'))) {
+                    chats.subscribedChats = chats.subscribedChats.filter(id => id !== chatId);
+                    await saveChats(chats);
+                    console.log(`🗑️ Удален недоступный чат ${chatId}`);
+                }
+            }
+        }
+        
+        console.log(`📊 Результат рассылки: ✅ ${successCount} успешно, ❌ ${errorCount} ошибок`);
+        return { successCount, errorCount };
+        
+    } catch (error) {
+        console.error('Ошибка массовой рассылки:', error);
+        return { successCount: 0, errorCount: 1 };
+    }
+}
+
 // Функция для расчета времени с начала подкаста (правильный календарный расчет)
 function calculateTimeSinceStart(startDate, currentDate) {
     let years = currentDate.getFullYear() - startDate.getFullYear();
@@ -750,12 +825,10 @@ async function checkForNewEpisodes(testCtx = null) {
         if (testCtx) {
             await testCtx.reply('📤 Тестовое уведомление:\n\n' + message, { parse_mode: 'Markdown' });
         } else {
-            logMsg('Готово к отправке уведомления:');
-            logMsg(message);
+            logMsg('Отправляю уведомление во все чаты...');
+            const sendResult = await sendToAllChats(message, 'Markdown');
+            logMsg(`Рассылка завершена: ${sendResult.successCount} успешно, ${sendResult.errorCount} ошибок`);
         }
-        
-        // TODO: Отправка во все чаты
-        // Пока только логируем
         
     } catch (error) {
         const errorMsg = `Ошибка проверки новых эпизодов: ${error.message}`;
@@ -884,14 +957,18 @@ async function checkMonthlyReport() {
 }
 
 // Обработка команды /start
-bot.start((ctx) => {
+bot.start(async (ctx) => {
+    // Автоматически подписываем чат на уведомления
+    await addChatToSubscriptions(ctx.chat.id);
+    
     ctx.reply(
         'Привет! Я бот для получения рецензий подкаста "Два по цене одного".\n\n' +
         'Команды:\n' +
         '/reviews - получить последние 20 рецензий из Apple Podcasts\n' +
         '/month - получить все рецензии за последний месяц\n' +
         '/all - получить ВСЕ доступные рецензии (может быть много!)\n' +
-        '/help - показать справку'
+        '/help - показать справку\n\n' +
+        '🔔 Вы автоматически подписаны на уведомления о новых эпизодах!'
     );
 });
 
@@ -916,6 +993,9 @@ bot.help((ctx) => {
 // Обработка команды /reviews
 bot.command('reviews', async (ctx) => {
     try {
+        // Автоматически подписываем чат на уведомления
+        await addChatToSubscriptions(ctx.chat.id);
+        
         // Получаем рецензии (функция сама показывает прогресс)
         const reviews = await getPodcastReviews(ctx);
         
@@ -964,6 +1044,9 @@ bot.command('reviews', async (ctx) => {
 // Обработка команды /month
 bot.command('month', async (ctx) => {
     try {
+        // Автоматически подписываем чат на уведомления
+        await addChatToSubscriptions(ctx.chat.id);
+        
         // Получаем месячные рецензии (с показом прогресса)
         const reviews = await getMonthlyReviews(ctx, true);
         
@@ -1187,6 +1270,47 @@ bot.command('check_rss', async (ctx) => {
     } catch (error) {
         console.error('Ошибка диагностики:', error);
         await ctx.reply(`❌ Ошибка диагностики: ${error.message}`);
+    }
+});
+
+// Команда для немедленной отправки уведомления о последнем эпизоде
+bot.command('send_latest', async (ctx) => {
+    try {
+        await ctx.reply('📤 Отправляю уведомление о последнем эпизоде во все чаты...');
+        
+        // Получаем последний эпизод из RSS
+        const feed = await parser.parseURL(RSS_FEED_URL);
+        const latestEpisode = feed.items[0];
+        
+        // Получаем текущую статистику и симулируем обновление
+        const stats = await loadStats();
+        const duration = parseDurationToSeconds(latestEpisode.itunes?.duration);
+        
+        const updatedStats = {
+            ...stats,
+            totalEpisodes: stats.totalEpisodes + 1,
+            totalHours: stats.totalHours + (duration / 3600),
+            startDate: new Date(stats.startDate)
+        };
+        
+        // Формируем уведомление
+        const message = await formatNewEpisodeMessage(updatedStats, latestEpisode);
+        
+        // Отправляем во все чаты
+        const result = await sendToAllChats(message, 'Markdown');
+        
+        await ctx.reply(`✅ Уведомление отправлено!\n📊 Результат: ${result.successCount} чатов получили сообщение, ${result.errorCount} ошибок`);
+        
+        // Обновляем статистику после успешной отправки
+        updatedStats.lastEpisodeId = latestEpisode.guid;
+        updatedStats.lastCheck = new Date().toISOString();
+        await saveStats(updatedStats);
+        
+        await ctx.reply('📊 Статистика обновлена после отправки уведомления');
+        
+    } catch (error) {
+        console.error('Ошибка отправки уведомления:', error);
+        await ctx.reply(`❌ Ошибка: ${error.message}`);
     }
 });
 
