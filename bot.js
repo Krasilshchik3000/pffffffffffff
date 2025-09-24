@@ -1366,6 +1366,44 @@ bot.command('test_broadcast', async (ctx) => {
     }
 });
 
+// Команда для принудительной подписки на уведомления
+bot.command('subscribe', async (ctx) => {
+    try {
+        const chatId = ctx.chat.id;
+        await ctx.reply(`🔔 Подписываю чат ${chatId} на уведомления...`);
+        
+        await addChatToSubscriptions(chatId);
+        
+        const chats = await loadChats();
+        const isSubscribed = chats.subscribedChats.includes(chatId);
+        
+        if (isSubscribed) {
+            await ctx.reply(`✅ Чат успешно подписан!\n📊 Всего подписчиков: ${chats.subscribedChats.length}`);
+        } else {
+            await ctx.reply('❌ Ошибка подписки. Попробуйте еще раз.');
+        }
+        
+    } catch (error) {
+        await ctx.reply(`❌ Ошибка подписки: ${error.message}`);
+    }
+});
+
+// Команда для отписки от уведомлений
+bot.command('unsubscribe', async (ctx) => {
+    try {
+        const chatId = ctx.chat.id;
+        const chats = await loadChats();
+        
+        chats.subscribedChats = chats.subscribedChats.filter(id => id !== chatId);
+        await saveChats(chats);
+        
+        await ctx.reply(`✅ Чат ${chatId} отписан от уведомлений.\n📊 Осталось подписчиков: ${chats.subscribedChats.length}`);
+        
+    } catch (error) {
+        await ctx.reply(`❌ Ошибка отписки: ${error.message}`);
+    }
+});
+
 // Команда для принудительного обновления меню команд
 bot.command('update_menu', async (ctx) => {
     try {
