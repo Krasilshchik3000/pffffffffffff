@@ -1328,6 +1328,44 @@ bot.command('reset_monitoring', async (ctx) => {
     }
 });
 
+// Команда для просмотра подписанных чатов
+bot.command('list_chats', async (ctx) => {
+    try {
+        const chats = await loadChats();
+        
+        if (chats.subscribedChats.length === 0) {
+            await ctx.reply('📭 Нет подписанных чатов для уведомлений.');
+            return;
+        }
+        
+        await ctx.reply(`📋 Подписанные чаты (${chats.subscribedChats.length}):\n\n${chats.subscribedChats.map((id, i) => `${i + 1}. Chat ID: ${id}`).join('\n')}`);
+        
+        // Также покажем информацию о текущем чате
+        const currentChatId = ctx.chat.id;
+        const isSubscribed = chats.subscribedChats.includes(currentChatId);
+        await ctx.reply(`\n🏠 Текущий чат: ${currentChatId}\n📬 Подписан: ${isSubscribed ? '✅ Да' : '❌ Нет'}`);
+        
+    } catch (error) {
+        await ctx.reply(`❌ Ошибка: ${error.message}`);
+    }
+});
+
+// Команда для тестирования отправки во все чаты
+bot.command('test_broadcast', async (ctx) => {
+    try {
+        const testMessage = `🧪 Тестовое сообщение рассылки\n\nВремя: ${new Date().toLocaleString('ru-RU')}\nОтправлено из чата: ${ctx.chat.id}`;
+        
+        await ctx.reply('📤 Отправляю тестовое сообщение во все подписанные чаты...');
+        
+        const result = await sendToAllChats(testMessage);
+        
+        await ctx.reply(`✅ Рассылка завершена!\n📊 Результат: ${result.successCount} успешно, ${result.errorCount} ошибок`);
+        
+    } catch (error) {
+        await ctx.reply(`❌ Ошибка рассылки: ${error.message}`);
+    }
+});
+
 // Команда для принудительного обновления меню команд
 bot.command('update_menu', async (ctx) => {
     try {
@@ -1760,7 +1798,13 @@ bot.launch().then(async () => {
     });
     
     // Запускаем мониторинг новых эпизодов каждые 10 минут
-    setInterval(checkForNewEpisodes, 10 * 60 * 1000);
+    setInterval(() => {
+        const now = new Date();
+        console.log(`🔍 [${now.toLocaleString('ru-RU')}] Автоматическая проверка новых эпизодов...`);
+        checkForNewEpisodes().catch(error => {
+            console.error(`❌ [${now.toLocaleString('ru-RU')}] Ошибка автоматической проверки:`, error);
+        });
+    }, 10 * 60 * 1000);
     console.log('🔍 Мониторинг новых эпизодов запущен (проверка каждые 10 минут)');
     
     // Запускаем проверку месячных отчетов каждые 6 часов
