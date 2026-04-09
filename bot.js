@@ -205,6 +205,26 @@ async function initializeEpisodeBaseline() {
     }
 }
 
+// Find podcast.ru link for an episode via iTunes Search API
+async function findPodcastRuLink(episodeTitle) {
+    try {
+        const query = encodeURIComponent(episodeTitle.substring(0, 60));
+        const url = `https://itunes.apple.com/search?term=${query}&entity=podcastEpisode&limit=10&attribute=titleTerm`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+
+        // Find the episode that belongs to our podcast
+        const match = data.results?.find(r => r.collectionId === parseInt(PODCAST_ID));
+        if (!match) return null;
+
+        return `https://podcast.ru/${PODCAST_ID}/e/${match.trackId}`;
+    } catch (err) {
+        console.log('podcast.ru link lookup failed:', err.message);
+        return null;
+    }
+}
+
 async function checkForNewEpisodes() {
     if (!botReady) return;
     console.log(`[${new Date().toISOString()}] Checking for new episodes...`);
@@ -230,7 +250,10 @@ async function checkForNewEpisodes() {
         lastEpisodeGuid = latest.guid;
 
         const date = latest.pubDate ? formatDate(latest.pubDate) : '';
-        const msg = `🎙 <b>Вышел новый выпуск!</b>\n\n${escapeHtml(latest.title)}\n📅 ${date}`;
+        const link = await findPodcastRuLink(latest.title);
+        const linkLine = link ? `\n\n🔗 <a href="${link}">Слушать на podcast.ru</a>` : '';
+
+        const msg = `🎙 <b>Вышел новый выпуск!</b>\n\n${escapeHtml(latest.title)}\n📅 ${date}${linkLine}`;
         await sendNotification(msg);
 
     } catch (err) {
