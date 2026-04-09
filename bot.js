@@ -389,10 +389,22 @@ async function start() {
         initializeEpisodeBaseline(),
     ]);
 
-    // Launch bot
-    await bot.launch();
-    botReady = true;
-    console.log('Bot launched successfully');
+    // Launch bot with retries (409 Conflict happens when old instance is still shutting down)
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+            await bot.launch();
+            botReady = true;
+            console.log('Bot launched successfully');
+            break;
+        } catch (err) {
+            if (err.message?.includes('409') && attempt < 5) {
+                console.log(`Launch attempt ${attempt}/5 failed (409 Conflict), retrying in ${attempt * 5}s...`);
+                await new Promise(r => setTimeout(r, attempt * 5000));
+            } else {
+                throw err;
+            }
+        }
+    }
 
     // Set up commands menu
     await bot.telegram.setMyCommands([
@@ -420,6 +432,6 @@ process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 start().catch(err => {
-    console.error('Fatal startup error:', err);
-    process.exit(1);
+    console.error('Startup error:', err.message);
+    console.log('Bot will retry on next deploy. Health check server remains active.');
 });
