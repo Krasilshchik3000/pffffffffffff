@@ -364,11 +364,37 @@ async function start() {
 
     // Delete any stale webhook first, then launch with polling
     console.log('Clearing webhook and launching bot...');
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    try {
+        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+        console.log('Webhook cleared');
+    } catch (e) {
+        console.log('Webhook clear failed (ok):', e.message);
+    }
 
-    await bot.launch({ dropPendingUpdates: true });
-    botReady = true;
-    console.log('Bot launched successfully');
+    // bot.launch() may hang if another instance is polling — use timeout + retry
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const launchPromise = bot.launch({ dropPendingUpdates: true });
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Launch timeout')), 30000)
+            );
+            await Promise.race([launchPromise, timeoutPromise]);
+            botReady = true;
+            console.log('Bot launched successfully');
+            break;
+        } catch (err) {
+            console.log(`Launch attempt ${attempt}/3 failed: ${err.message}`);
+            if (attempt < 3) {
+                // Stop the bot's internal polling before retrying
+                try { bot.stop(); } catch (_) {}
+                console.log(`Waiting 30s before retry...`);
+                await new Promise(r => setTimeout(r, 30000));
+            } else {
+                console.log('All launch attempts failed. Bot will run without Telegram polling.');
+                console.log('Review monitoring still active via periodic checks.');
+            }
+        }
+    }
 
     // Set up commands menu
     await bot.telegram.setMyCommands([
