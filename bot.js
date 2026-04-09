@@ -339,17 +339,9 @@ bot.catch((err, ctx) => {
 
 // --- Startup ---
 
-// Start HTTP server IMMEDIATELY so Railway healthcheck passes
 const PORT = process.env.PORT || 3000;
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-        status: botReady ? 'ok' : 'starting',
-        reviews_tracked: seenReviewIds.size,
-        uptime: Math.floor(process.uptime()),
-    }));
-});
-server.listen(PORT, () => console.log(`Health check on port ${PORT}`));
+const WEBHOOK_DOMAIN = process.env.RAILWAY_PUBLIC_DOMAIN; // e.g. web-production-6629.up.railway.app
+const WEBHOOK_SECRET = BOT_TOKEN.split(':')[1]; // use part of token as secret path
 
 let reviewInterval, episodeInterval;
 
@@ -362,25 +354,74 @@ async function start() {
         initializeEpisodeBaseline(),
     ]);
 
-    // Launch Telegram polling
-    console.log('Launching Telegram bot...');
-    try {
-        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    } catch (_) {}
+    if (WEBHOOK_DOMAIN) {
+        // --- Production: Webhook mode (no 409 conflicts, instant response) ---
+        const webhookPath = `/webhook/${WEBHOOK_SECRET}`;
+        const webhookUrl = `https://${WEBHOOK_DOMAIN}${webhookPath}`;
 
-    // bot.launch() starts polling in background — it doesn't resolve
-    bot.launch({ dropPendingUpdates: true })
-        .catch(err => console.error('Bot polling error:', err.message));
+        // Set up HTTP server that handles both webhooks and health checks
+        const webhookCallback = await bot.createWebhook({ domain: WEBHOOK_DOMAIN, path: webhookPath });
 
-    // Verify bot works by calling getMe
-    try {
-        const me = await bot.telegram.getMe();
+        const server = http.createServer((req, res) => {
+            if (req.url === webhookPath && req.method === 'POST') {
+                webhookCallback(req, res);
+            } else {
+                // Health check for all other routes
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    status: botReady ? 'ok' : 'starting',
+                    reviews_tracked: seenReviewIds.size,
+                    uptime: Math.floor(process.uptime()),
+                }));
+            }
+        });
+
+        server.listen(PORT, () => {
+            console.log(`Webhook server on port ${PORT}`);
+            console.log(`Webhook URL: ${webhookUrl}`);
+        });
+
         botReady = true;
-        console.log(`Bot launched: @${me.username}`);
-    } catch (err) {
-        console.error('Bot getMe failed:', err.message);
-        console.log('Bot may still start — polling runs in background');
-        botReady = true; // Allow monitoring to work regardless
+        const me = await bot.telegram.getMe();
+        console.log(`Bot ready: @${me.username} (webhook mode)`);
+
+        // Graceful shutdown
+        const shutdown = (signal) => {
+            console.log(`${signal} received`);
+            if (reviewInterval) clearInterval(reviewInterval);
+            if (episodeInterval) clearInterval(episodeInterval);
+            server.close();
+        };
+        process.once('SIGINT', () => shutdown('SIGINT'));
+        process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+    } else {
+        // --- Local dev: Polling mode ---
+        console.log('No RAILWAY_PUBLIC_DOMAIN — using polling (local dev mode)');
+
+        const server = http.createServer((req, res) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: botReady ? 'ok' : 'starting', reviews_tracked: seenReviewIds.size }));
+        });
+        server.listen(PORT, () => console.log(`Health check on port ${PORT}`));
+
+        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+        bot.launch({ dropPendingUpdates: true })
+            .catch(err => console.error('Polling error:', err.message));
+
+        botReady = true;
+        const me = await bot.telegram.getMe();
+        console.log(`Bot ready: @${me.username} (polling mode)`);
+
+        const shutdown = (signal) => {
+            console.log(`${signal} received`);
+            if (reviewInterval) clearInterval(reviewInterval);
+            if (episodeInterval) clearInterval(episodeInterval);
+            server.close();
+            bot.stop(signal);
+        };
+        process.once('SIGINT', () => shutdown('SIGINT'));
+        process.once('SIGTERM', () => shutdown('SIGTERM'));
     }
 
     // Set up commands menu
@@ -391,24 +432,11 @@ async function start() {
     ]);
 
     // Schedule periodic checks
-    reviewInterval = setInterval(checkForNewReviews, 60 * 60 * 1000); // every hour
-    episodeInterval = setInterval(checkForNewEpisodes, 10 * 60 * 1000); // every 10 min
-
+    reviewInterval = setInterval(checkForNewReviews, 60 * 60 * 1000);
+    episodeInterval = setInterval(checkForNewEpisodes, 10 * 60 * 1000);
     console.log('Monitoring active: reviews every 60min, episodes every 10min');
 }
 
-// Graceful shutdown
-const shutdown = (signal) => {
-    console.log(`${signal} received, shutting down...`);
-    if (reviewInterval) clearInterval(reviewInterval);
-    if (episodeInterval) clearInterval(episodeInterval);
-    server.close();
-    bot.stop(signal);
-};
-process.once('SIGINT', () => shutdown('SIGINT'));
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-
 start().catch(err => {
     console.error('Startup error:', err.message);
-    console.log('Bot will retry on next deploy. Health check server remains active.');
 });
