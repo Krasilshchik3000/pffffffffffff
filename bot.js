@@ -11,21 +11,37 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '869587').split(',').map(Number);
 const NOTIFY_CHAT_ID = process.env.NOTIFY_CHAT_ID || null; // optional: separate channel
 const EPISODE_RSS_URL = process.env.EPISODE_RSS_URL || 'https://feeds.transistor.fm/8ad5c0b4-9622-4e86-ba14-2a2e436f68b3';
 
-// All Apple Podcasts / iTunes Store territories (ISO 3166-1 alpha-2)
-// We check every store to never miss a review
+// All iTunes Store territories where Apple Podcasts reviews can exist
 const COUNTRY_CODES = [
+    // CIS + post-Soviet
     'ru', 'ua', 'by', 'kz', 'uz', 'kg', 'tj', 'tm', 'az', 'ge', 'am', 'md',
-    'us', 'gb', 'ca', 'au', 'nz', 'ie',
+    // North America + Oceania
+    'us', 'ca', 'gb', 'ie', 'au', 'nz',
+    // Western Europe
     'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch', 'at', 'lu',
+    // Nordics
     'se', 'no', 'dk', 'fi', 'is',
+    // Central/Eastern Europe
     'pl', 'cz', 'hu', 'sk', 'si', 'hr', 'bg', 'ro',
+    // Baltics
     'lt', 'lv', 'ee',
+    // Balkans
     'rs', 'me', 'mk', 'ba', 'al',
-    'il', 'tr', 'sa', 'ae', 'eg', 'qa', 'kw', 'bh', 'om', 'jo', 'lb',
-    'za', 'ng', 'ke',
-    'in', 'jp', 'kr', 'cn', 'sg', 'my', 'id', 'ph', 'th', 'vn', 'hk', 'tw',
-    'br', 'mx', 'ar', 'cl', 'co', 'pe',
+    // Mediterranean
     'gr', 'cy', 'mt',
+    // Middle East
+    'il', 'tr', 'sa', 'ae', 'eg', 'qa', 'kw', 'bh', 'om', 'jo', 'lb',
+    // Africa
+    'za', 'ng', 'ke', 'tz', 'ug', 'gh', 'sn', 'mz', 'zw', 'bw', 'mu', 'mg', 'cv', 'ml', 'bf', 'ne',
+    // South Asia
+    'in', 'pk', 'lk', 'np', 'bd',
+    // East/Southeast Asia
+    'jp', 'kr', 'cn', 'sg', 'my', 'id', 'ph', 'th', 'vn', 'hk', 'tw', 'mo', 'kh', 'la', 'mm',
+    // Latin America
+    'br', 'mx', 'ar', 'cl', 'co', 'pe', 'ec', 've', 'cr', 'pa', 'uy', 'py', 'bo',
+    'gt', 'hn', 'sv', 'ni', 'do', 'tt', 'jm',
+    // Caribbean + misc
+    'bs', 'bb', 'bz', 'gy', 'sr', 'fj', 'pg', 'bn',
 ];
 
 // --- In-memory state ---
