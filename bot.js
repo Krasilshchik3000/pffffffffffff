@@ -366,6 +366,20 @@ bot.catch((err, ctx) => {
 
 // --- Startup ---
 
+// Start HTTP server IMMEDIATELY so Railway healthcheck passes
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        status: botReady ? 'ok' : 'starting',
+        reviews_tracked: seenReviewIds.size,
+        uptime: Math.floor(process.uptime()),
+    }));
+});
+server.listen(PORT, () => console.log(`Health check on port ${PORT}`));
+
+let reviewInterval, episodeInterval;
+
 async function start() {
     console.log('Starting bot...');
 
@@ -388,34 +402,22 @@ async function start() {
     ]);
 
     // Schedule periodic checks
-    const reviewInterval = setInterval(checkForNewReviews, 60 * 60 * 1000); // every hour
-    const episodeInterval = setInterval(checkForNewEpisodes, 10 * 60 * 1000); // every 10 min
+    reviewInterval = setInterval(checkForNewReviews, 60 * 60 * 1000); // every hour
+    episodeInterval = setInterval(checkForNewEpisodes, 10 * 60 * 1000); // every 10 min
 
     console.log('Monitoring active: reviews every 60min, episodes every 10min');
-
-    // Health check HTTP server
-    const PORT = process.env.PORT || 3000;
-    const server = http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            status: botReady ? 'ok' : 'starting',
-            reviews_tracked: seenReviewIds.size,
-            uptime: Math.floor(process.uptime()),
-        }));
-    });
-    server.listen(PORT, () => console.log(`Health check on port ${PORT}`));
-
-    // Graceful shutdown
-    const shutdown = (signal) => {
-        console.log(`${signal} received, shutting down...`);
-        clearInterval(reviewInterval);
-        clearInterval(episodeInterval);
-        server.close();
-        bot.stop(signal);
-    };
-    process.once('SIGINT', () => shutdown('SIGINT'));
-    process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
+
+// Graceful shutdown
+const shutdown = (signal) => {
+    console.log(`${signal} received, shutting down...`);
+    if (reviewInterval) clearInterval(reviewInterval);
+    if (episodeInterval) clearInterval(episodeInterval);
+    server.close();
+    bot.stop(signal);
+};
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 start().catch(err => {
     console.error('Fatal startup error:', err);
