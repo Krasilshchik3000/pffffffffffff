@@ -362,38 +362,25 @@ async function start() {
         initializeEpisodeBaseline(),
     ]);
 
-    // Delete any stale webhook first, then launch with polling
-    console.log('Clearing webhook and launching bot...');
+    // Launch Telegram polling
+    console.log('Launching Telegram bot...');
     try {
         await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-        console.log('Webhook cleared');
-    } catch (e) {
-        console.log('Webhook clear failed (ok):', e.message);
-    }
+    } catch (_) {}
 
-    // bot.launch() may hang if another instance is polling — use timeout + retry
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const launchPromise = bot.launch({ dropPendingUpdates: true });
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Launch timeout')), 30000)
-            );
-            await Promise.race([launchPromise, timeoutPromise]);
-            botReady = true;
-            console.log('Bot launched successfully');
-            break;
-        } catch (err) {
-            console.log(`Launch attempt ${attempt}/3 failed: ${err.message}`);
-            if (attempt < 3) {
-                // Stop the bot's internal polling before retrying
-                try { bot.stop(); } catch (_) {}
-                console.log(`Waiting 30s before retry...`);
-                await new Promise(r => setTimeout(r, 30000));
-            } else {
-                console.log('All launch attempts failed. Bot will run without Telegram polling.');
-                console.log('Review monitoring still active via periodic checks.');
-            }
-        }
+    // bot.launch() starts polling in background — it doesn't resolve
+    bot.launch({ dropPendingUpdates: true })
+        .catch(err => console.error('Bot polling error:', err.message));
+
+    // Verify bot works by calling getMe
+    try {
+        const me = await bot.telegram.getMe();
+        botReady = true;
+        console.log(`Bot launched: @${me.username}`);
+    } catch (err) {
+        console.error('Bot getMe failed:', err.message);
+        console.log('Bot may still start — polling runs in background');
+        botReady = true; // Allow monitoring to work regardless
     }
 
     // Set up commands menu
