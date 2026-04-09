@@ -362,23 +362,13 @@ async function start() {
         initializeEpisodeBaseline(),
     ]);
 
-    // Launch bot with retries (409 Conflict happens when old instance is still shutting down)
-    for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-            await bot.launch();
-            botReady = true;
-            console.log('Bot launched successfully');
-            break;
-        } catch (err) {
-            if (err.message?.includes('409') && attempt < 5) {
-                const delay = attempt * 15;
-                console.log(`Launch attempt ${attempt}/5 failed (409 Conflict), retrying in ${delay}s...`);
-                await new Promise(r => setTimeout(r, delay * 1000));
-            } else {
-                throw err;
-            }
-        }
-    }
+    // Delete any stale webhook first, then launch with polling
+    console.log('Clearing webhook and launching bot...');
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+
+    await bot.launch({ dropPendingUpdates: true });
+    botReady = true;
+    console.log('Bot launched successfully');
 
     // Set up commands menu
     await bot.telegram.setMyCommands([
