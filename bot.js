@@ -11,48 +11,21 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '869587').split(',').map(Number);
 const NOTIFY_CHAT_ID = process.env.NOTIFY_CHAT_ID || null; // optional: separate channel
 const EPISODE_RSS_URL = process.env.EPISODE_RSS_URL || 'https://feeds.transistor.fm/8ad5c0b4-9622-4e86-ba14-2a2e436f68b3';
 
-// Countries to check for reviews (focused on where Russian-language podcast listeners are)
-const COUNTRIES = [
-    { code: 'us', name: 'США' },
-    { code: 'ua', name: 'Украина' },
-    { code: 'by', name: 'Беларусь' },
-    { code: 'de', name: 'Германия' },
-    { code: 'gb', name: 'Великобритания' },
-    { code: 'ca', name: 'Канада' },
-    { code: 'il', name: 'Израиль' },
-    { code: 'ge', name: 'Грузия' },
-    { code: 'am', name: 'Армения' },
-    { code: 'kz', name: 'Казахстан' },
-    { code: 'nl', name: 'Нидерланды' },
-    { code: 'fr', name: 'Франция' },
-    { code: 'es', name: 'Испания' },
-    { code: 'it', name: 'Италия' },
-    { code: 'pl', name: 'Польша' },
-    { code: 'cz', name: 'Чехия' },
-    { code: 'se', name: 'Швеция' },
-    { code: 'no', name: 'Норвегия' },
-    { code: 'fi', name: 'Финляндия' },
-    { code: 'pt', name: 'Португалия' },
-    { code: 'at', name: 'Австрия' },
-    { code: 'ch', name: 'Швейцария' },
-    { code: 'au', name: 'Австралия' },
-    { code: 'ae', name: 'ОАЭ' },
-    { code: 'tr', name: 'Турция' },
-    { code: 'lt', name: 'Литва' },
-    { code: 'lv', name: 'Латвия' },
-    { code: 'ee', name: 'Эстония' },
-    { code: 'rs', name: 'Сербия' },
-    { code: 'me', name: 'Черногория' },
-    { code: 'cy', name: 'Кипр' },
-    { code: 'bg', name: 'Болгария' },
-    { code: 'hr', name: 'Хорватия' },
-    { code: 'si', name: 'Словения' },
-    { code: 'nz', name: 'Новая Зеландия' },
-    { code: 'sg', name: 'Сингапур' },
-    { code: 'th', name: 'Таиланд' },
-    { code: 'ar', name: 'Аргентина' },
-    { code: 'mx', name: 'Мексика' },
-    { code: 'jp', name: 'Япония' },
+// All Apple Podcasts / iTunes Store territories (ISO 3166-1 alpha-2)
+// We check every store to never miss a review
+const COUNTRY_CODES = [
+    'ru', 'ua', 'by', 'kz', 'uz', 'kg', 'tj', 'tm', 'az', 'ge', 'am', 'md',
+    'us', 'gb', 'ca', 'au', 'nz', 'ie',
+    'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch', 'at', 'lu',
+    'se', 'no', 'dk', 'fi', 'is',
+    'pl', 'cz', 'hu', 'sk', 'si', 'hr', 'bg', 'ro',
+    'lt', 'lv', 'ee',
+    'rs', 'me', 'mk', 'ba', 'al',
+    'il', 'tr', 'sa', 'ae', 'eg', 'qa', 'kw', 'bh', 'om', 'jo', 'lb',
+    'za', 'ng', 'ke',
+    'in', 'jp', 'kr', 'cn', 'sg', 'my', 'id', 'ph', 'th', 'vn', 'hk', 'tw',
+    'br', 'mx', 'ar', 'cl', 'co', 'pe',
+    'gr', 'cy', 'mt',
 ];
 
 // --- In-memory state ---
@@ -89,11 +62,11 @@ function formatReviewHtml(review) {
     const title = escapeHtml(review.title);
     const author = escapeHtml(review.author);
     const text = escapeHtml(review.content);
-    const country = escapeHtml(review.countryName);
+    const cc = (review.countryCode || '??').toUpperCase();
     const date = formatDate(review.updated);
     const rating = stars(review.rating);
 
-    return `<b>${title}</b>\n${rating}\n${author} · ${country} · ${date}\n\n${text}`;
+    return `<b>${title}</b>\n${rating}\n${author} · ${cc} · ${date}\n\n${text}`;
 }
 
 async function sendNotification(text, parseMode = 'HTML') {
@@ -136,19 +109,19 @@ async function fetchReviewsForCountry(countryCode) {
 
 async function fetchAllReviews() {
     const allReviews = [];
-    // Fetch countries in batches of 5 to avoid overwhelming
-    for (let i = 0; i < COUNTRIES.length; i += 5) {
-        const batch = COUNTRIES.slice(i, i + 5);
+    // Fetch countries in batches of 8 to balance speed and politeness
+    for (let i = 0; i < COUNTRY_CODES.length; i += 8) {
+        const batch = COUNTRY_CODES.slice(i, i + 8);
         const results = await Promise.all(
-            batch.map(async (country) => {
-                const reviews = await fetchReviewsForCountry(country.code);
-                return reviews.map(r => ({ ...r, countryCode: country.code, countryName: country.name }));
+            batch.map(async (cc) => {
+                const reviews = await fetchReviewsForCountry(cc);
+                return reviews.map(r => ({ ...r, countryCode: cc }));
             })
         );
         allReviews.push(...results.flat());
         // Small delay between batches
-        if (i + 5 < COUNTRIES.length) {
-            await new Promise(r => setTimeout(r, 500));
+        if (i + 8 < COUNTRY_CODES.length) {
+            await new Promise(r => setTimeout(r, 300));
         }
     }
 
@@ -169,7 +142,7 @@ async function initializeReviewBaseline() {
     for (const r of reviews) {
         seenReviewIds.add(r.id);
     }
-    console.log(`Baseline: ${seenReviewIds.size} reviews marked as seen across ${COUNTRIES.length} countries`);
+    console.log(`Baseline: ${seenReviewIds.size} reviews marked as seen across ${COUNTRY_CODES.length} countries`);
 }
 
 async function checkForNewReviews() {
@@ -278,7 +251,7 @@ bot.help((ctx) => {
 
 bot.command('reviews', async (ctx) => {
     try {
-        await ctx.reply(`🔍 Собираю отзывы из ${COUNTRIES.length} стран...`);
+        await ctx.reply(`🔍 Собираю отзывы из ${COUNTRY_CODES.length} стран...`);
 
         const reviews = await fetchAllReviews();
 
@@ -304,7 +277,7 @@ bot.command('reviews', async (ctx) => {
             await new Promise(r => setTimeout(r, 300));
         }
 
-        await ctx.reply(`Готово! ${reviews.length} отзывов из ${COUNTRIES.length} стран.`);
+        await ctx.reply(`Готово! ${reviews.length} отзывов из ${COUNTRY_CODES.length} стран.`);
     } catch (err) {
         console.error('Error in /reviews:', err.message);
         await ctx.reply('Произошла ошибка. Попробуйте позже.');
@@ -320,7 +293,7 @@ bot.command('status', async (ctx) => {
         `📊 Статус бота\n\n` +
         `Аптайм: ${hours}ч ${mins}м\n` +
         `Отзывов в базе: ${seenReviewIds.size}\n` +
-        `Стран: ${COUNTRIES.length}\n` +
+        `Стран: ${COUNTRY_CODES.length}\n` +
         `Последний эпизод: ${lastEpisodeGuid ? 'отслеживается' : 'не установлен'}\n` +
         `Уведомления в: ${NOTIFY_CHAT_ID || 'не настроено'}\n` +
         `Готов: ${botReady ? 'да' : 'инициализация...'}`
@@ -398,8 +371,9 @@ async function start() {
             break;
         } catch (err) {
             if (err.message?.includes('409') && attempt < 5) {
-                console.log(`Launch attempt ${attempt}/5 failed (409 Conflict), retrying in ${attempt * 5}s...`);
-                await new Promise(r => setTimeout(r, attempt * 5000));
+                const delay = attempt * 15;
+                console.log(`Launch attempt ${attempt}/5 failed (409 Conflict), retrying in ${delay}s...`);
+                await new Promise(r => setTimeout(r, delay * 1000));
             } else {
                 throw err;
             }
