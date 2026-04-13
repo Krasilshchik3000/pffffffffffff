@@ -205,19 +205,27 @@ async function initializeEpisodeBaseline() {
     }
 }
 
-// Find podcast.ru link for an episode via iTunes Search API
+// Find podcast.ru link for an episode via iTunes Lookup API
+// Uses lookup (not search) because new episodes appear in lookup immediately but search lags
 async function findPodcastRuLink(episodeTitle) {
     try {
-        const query = encodeURIComponent(episodeTitle.substring(0, 60));
-        const url = `https://itunes.apple.com/search?term=${query}&entity=podcastEpisode&limit=10&attribute=titleTerm`;
+        const url = `https://itunes.apple.com/lookup?id=${PODCAST_ID}&entity=podcastEpisode&limit=10&sort=recent`;
         const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
         if (!resp.ok) return null;
         const data = await resp.json();
 
-        // Find the episode that belongs to our podcast
-        const match = data.results?.find(r => r.collectionId === parseInt(PODCAST_ID));
-        if (!match) return null;
+        // Find the episode by title match
+        const normalizedTitle = episodeTitle.toLowerCase().trim();
+        const match = data.results?.find(r =>
+            r.kind === 'podcast-episode' &&
+            r.trackName?.toLowerCase().trim() === normalizedTitle
+        );
+        if (!match) {
+            console.log(`podcast.ru: no match for "${episodeTitle}" in ${data.results?.length || 0} results`);
+            return null;
+        }
 
+        console.log(`podcast.ru: found trackId=${match.trackId}`);
         return `https://podcast.ru/${PODCAST_ID}/e/${match.trackId}`;
     } catch (err) {
         console.log('podcast.ru link lookup failed:', err.message);
